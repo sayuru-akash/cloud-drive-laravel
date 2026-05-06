@@ -19,7 +19,11 @@ defineProps<{
 
 <template>
     <Head>
-        <meta head-key="robots" name="robots" content="noindex,nofollow,noarchive" />
+        <meta
+            head-key="robots"
+            name="robots"
+            content="noindex,nofollow,noarchive"
+        />
     </Head>
     <div
         class="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10"

@@ -6,7 +6,8 @@ import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { initializeFlashToast } from '@/lib/flashToast';
 
 const envAppName = import.meta.env.VITE_APP_NAME;
-const appName = envAppName && envAppName !== 'Laravel' ? envAppName : 'Cloud Drive';
+const appName =
+    envAppName && envAppName !== 'Laravel' ? envAppName : 'Cloud Drive';
 
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
