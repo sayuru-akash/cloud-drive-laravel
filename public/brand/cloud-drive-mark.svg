@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+    <title id="title">Cloud Drive mark</title>
+    <desc id="desc">A green and purple gradient ring with a clear center.</desc>
+    <defs>
+        <linearGradient id="cloud-drive-ring" x1="8" y1="52" x2="56" y2="12" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#197a68"/>
+            <stop offset="0.48" stop-color="#35c6a0"/>
+            <stop offset="1" stop-color="#7c3aed"/>
+        </linearGradient>
+        <filter id="cloud-drive-soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#197a68" flood-opacity="0.22"/>
+        </filter>
+    </defs>
+    <path fill="url(#cloud-drive-ring)" fill-rule="evenodd" filter="url(#cloud-drive-soft-shadow)" d="M32 6a26 26 0 1 1 0 52 26 26 0 0 1 0-52Zm0 12a14 14 0 1 0 0 28 14 14 0 0 0 0-28Z"/>
+</svg>

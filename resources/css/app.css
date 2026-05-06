@@ -1,0 +1,233 @@
+@import 'tailwindcss';
+
+@import 'tw-animate-css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans:
+        Instrument Sans, ui-sans-serif, system-ui, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+        'Noto Color Emoji';
+
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+
+    --color-sidebar: var(--sidebar-background);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentColor);
+    }
+}
+
+@layer utilities {
+    body,
+    html {
+        --font-sans:
+            'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
+            'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+            'Noto Color Emoji';
+    }
+}
+
+:root {
+    --background: #f7f4ee;
+    --surface: rgba(255, 255, 255, 0.72);
+    --surface-strong: #fffdf8;
+    --foreground: #111827;
+    --ink-950: #111827;
+    --ink-900: #18212f;
+    --ink-800: #253041;
+    --ink-700: #445063;
+    --ink-600: #5f6877;
+    --ink-500: #7a8497;
+    --ink-300: #c7cfdb;
+    --line: rgba(15, 23, 42, 0.1);
+    --brand: #197a68;
+    --brand-soft: rgba(25, 122, 104, 0.12);
+    --card: #fffdf8;
+    --card-foreground: #111827;
+    --popover: hsl(0 0% 100%);
+    --popover-foreground: hsl(0 0% 3.9%);
+    --primary: #111827;
+    --primary-foreground: #ffffff;
+    --secondary: hsl(0 0% 92.1%);
+    --secondary-foreground: hsl(0 0% 9%);
+    --muted: hsl(0 0% 96.1%);
+    --muted-foreground: #5f6877;
+    --accent: rgba(25, 122, 104, 0.12);
+    --accent-foreground: #197a68;
+    --destructive: hsl(0 84.2% 60.2%);
+    --destructive-foreground: hsl(0 0% 98%);
+    --border: hsl(0 0% 92.8%);
+    --input: hsl(0 0% 89.8%);
+    --ring: hsl(0 0% 3.9%);
+    --chart-1: hsl(12 76% 61%);
+    --chart-2: hsl(173 58% 39%);
+    --chart-3: hsl(197 37% 24%);
+    --chart-4: hsl(43 74% 66%);
+    --chart-5: hsl(27 87% 67%);
+    --radius: 1.25rem;
+    --sidebar-background: rgba(255, 255, 255, 0.78);
+    --sidebar-foreground: #445063;
+    --sidebar-primary: #111827;
+    --sidebar-primary-foreground: hsl(0 0% 98%);
+    --sidebar-accent: hsl(0 0% 94%);
+    --sidebar-accent-foreground: hsl(0 0% 30%);
+    --sidebar-border: hsl(0 0% 91%);
+    --sidebar-ring: hsl(217.2 91.2% 59.8%);
+    --sidebar: hsl(0 0% 98%);
+}
+
+.dark {
+    --background: #111827;
+    --surface: rgba(24, 33, 47, 0.72);
+    --surface-strong: #18212f;
+    --foreground: #f8fafc;
+    --card: rgba(24, 33, 47, 0.86);
+    --card-foreground: #f8fafc;
+    --popover: hsl(0 0% 3.9%);
+    --popover-foreground: hsl(0 0% 98%);
+    --primary: #f8fafc;
+    --primary-foreground: #111827;
+    --secondary: hsl(0 0% 14.9%);
+    --secondary-foreground: hsl(0 0% 98%);
+    --muted: hsl(0 0% 16.08%);
+    --muted-foreground: #c7cfdb;
+    --accent: rgba(45, 212, 191, 0.12);
+    --accent-foreground: #6ee7b7;
+    --destructive: hsl(0 84% 60%);
+    --destructive-foreground: hsl(0 0% 98%);
+    --border: rgba(255, 255, 255, 0.12);
+    --input: hsl(0 0% 14.9%);
+    --ring: hsl(0 0% 83.1%);
+    --chart-1: hsl(220 70% 50%);
+    --chart-2: hsl(160 60% 45%);
+    --chart-3: hsl(30 80% 55%);
+    --chart-4: hsl(280 65% 60%);
+    --chart-5: hsl(340 75% 55%);
+    --sidebar-background: rgba(24, 33, 47, 0.72);
+    --sidebar-foreground: #e5e7eb;
+    --sidebar-primary: hsl(360, 100%, 100%);
+    --sidebar-primary-foreground: hsl(0 0% 100%);
+    --sidebar-accent: hsl(0 0% 15.9%);
+    --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+    --sidebar-border: hsl(0 0% 15.9%);
+    --sidebar-ring: hsl(217.2 91.2% 59.8%);
+    --sidebar: hsl(240 5.9% 10%);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        min-height: 100vh;
+        background:
+            radial-gradient(circle at top, rgba(255, 255, 255, 0.9), transparent 34%),
+            linear-gradient(180deg, #f8f4ee 0%, #f7f4ee 100%);
+        @apply bg-background text-foreground;
+    }
+
+    .dark body {
+        background:
+            radial-gradient(circle at top, rgba(25, 122, 104, 0.18), transparent 34%),
+            linear-gradient(180deg, #111827 0%, #18212f 100%);
+    }
+}
+
+@theme inline {
+    --color-surface: var(--surface);
+    --color-surface-strong: var(--surface-strong);
+    --color-ink-950: var(--ink-950);
+    --color-ink-900: var(--ink-900);
+    --color-ink-800: var(--ink-800);
+    --color-ink-700: var(--ink-700);
+    --color-ink-600: var(--ink-600);
+    --color-ink-500: var(--ink-500);
+    --color-ink-300: var(--ink-300);
+    --color-line: var(--line);
+    --color-brand: var(--brand);
+    --color-brand-soft: var(--brand-soft);
+}
+
+@layer components {
+    .cloud-panel {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        border-radius: 2rem;
+        box-shadow: 0 24px 80px -52px rgba(15, 23, 42, 0.52);
+        backdrop-filter: blur(18px);
+    }
+
+    .cloud-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border-radius: 999px;
+        padding: 0.65rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        transition: all 160ms ease;
+    }
+}
