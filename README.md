@@ -6,15 +6,13 @@ The app is intentionally focused on the core drive workflow: upload, browse, org
 
 ## Screenshots
 
-These screenshots are captured from the real local Laravel app with the demo workspace seed.
+These desktop screenshots are captured from the real local Laravel app with the demo workspace seed.
 
-![Cloud Drive home](docs/screenshots/home.png)
+![Cloud Drive dashboard](docs/screenshots/dashboard-desktop.png)
 
-![Cloud Drive dashboard](docs/screenshots/dashboard.png)
+![Cloud Drive files](docs/screenshots/files-desktop.png)
 
-![Cloud Drive files](docs/screenshots/files.png)
-
-![Cloud Drive login](docs/screenshots/login.png)
+![Cloud Drive admin](docs/screenshots/admin-desktop.png)
 
 ## Stack
 
