@@ -99,12 +99,7 @@ php artisan migrate:fresh
 php artisan db:seed --class=DemoWorkspaceSeeder
 ```
 
-Demo login:
-
-- Email: `admin@example.com`
-- Password: `password`
-
-Do not run the demo seeder against production.
+Create an active super admin account before running the demo seeder. Do not run the demo seeder against production.
 
 ## Environment
 

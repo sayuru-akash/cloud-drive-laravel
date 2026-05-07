@@ -16,6 +16,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const passwordInput = useTemplateRef('passwordInput');
@@ -62,16 +63,28 @@ const passwordInput = useTemplateRef('passwordInput');
                             <DialogDescription>
                                 Once your account is deleted, all of its
                                 resources and data will also be permanently
-                                deleted. Please enter your password to confirm
-                                you would like to permanently delete your
-                                account.
+                                deleted. Confirm this action by typing the
+                                phrase below and entering your password.
                             </DialogDescription>
                         </DialogHeader>
 
+                        <InputError :message="errors.account" />
+
                         <div class="grid gap-2">
-                            <Label for="password" class="sr-only"
-                                >Password</Label
-                            >
+                            <Label for="delete_confirmation">
+                                Type DELETE MY ACCOUNT
+                            </Label>
+                            <Input
+                                id="delete_confirmation"
+                                name="delete_confirmation"
+                                placeholder="DELETE MY ACCOUNT"
+                                autocomplete="off"
+                            />
+                            <InputError :message="errors.delete_confirmation" />
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="password">Current password</Label>
                             <PasswordInput
                                 id="password"
                                 name="password"

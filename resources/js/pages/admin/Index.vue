@@ -8,8 +8,9 @@ import {
     ShieldCheck,
     UserPlus,
 } from 'lucide-vue-next';
-import { computed, reactive, ref, watch } from 'vue';
+import { reactive, ref, watch } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
+import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import { Badge } from '@/components/ui/badge';
@@ -55,7 +56,6 @@ const props = defineProps<{
         blockedExtensions: string[];
     };
     currentUserId: number;
-    canCreateSuperAdmin: boolean;
 }>();
 
 const settingsForm = useForm({
@@ -68,6 +68,7 @@ const settingsForm = useForm({
 const createDialogOpen = ref(false);
 const generatedPassword = ref('');
 const userEdits = reactive<Record<number, { role: UserRole; is_active: boolean }>>({});
+const usersRefreshProps = ['users', 'flash'];
 
 const createUserForm = useForm({
     name: '',
@@ -78,30 +79,18 @@ const createUserForm = useForm({
     password_confirmation: '',
 });
 
-const roleOptions = computed(() => {
-    const options: Array<{ value: UserRole; label: string; description: string }> = [
-        {
-            value: 'member',
-            label: 'Member',
-            description: 'Can manage their own files and view workspace files.',
-        },
-        {
-            value: 'admin',
-            label: 'Admin',
-            description: 'Can manage users, trash cleanup, settings, and audit logs.',
-        },
-    ];
-
-    if (props.canCreateSuperAdmin) {
-        options.push({
-            value: 'super_admin',
-            label: 'Super admin',
-            description: 'Full workspace ownership. Keep this tightly limited.',
-        });
-    }
-
-    return options;
-});
+const roleOptions: Array<{ value: UserRole; label: string; description: string }> = [
+    {
+        value: 'member',
+        label: 'Member',
+        description: 'Can manage their own files and view workspace files.',
+    },
+    {
+        value: 'admin',
+        label: 'Admin',
+        description: 'Can manage users, trash cleanup, settings, and audit logs.',
+    },
+];
 
 watch(
     () => props.users.data,
@@ -138,6 +127,7 @@ function resetCreateUserForm(): void {
 
 function createUser(): void {
     createUserForm.post('/admin/users', {
+        only: usersRefreshProps,
         preserveScroll: true,
         onSuccess: () => {
             resetCreateUserForm();
@@ -160,7 +150,7 @@ function userHasChanges(user: UserRow): boolean {
 }
 
 function isSuperAdminLocked(user: UserRow): boolean {
-    return user.role === 'super_admin' && !props.canCreateSuperAdmin;
+    return user.role === 'super_admin';
 }
 
 function isSelfDisable(user: UserRow): boolean {
@@ -175,6 +165,14 @@ function saveUser(user: UserRow): void {
     }
 
     router.patch(`/admin/users/${user.id}`, edit, {
+        only: usersRefreshProps,
+        preserveScroll: true,
+    });
+}
+
+function saveSettings(): void {
+    settingsForm.patch('/admin/settings', {
+        only: ['settings', 'flash'],
         preserveScroll: true,
     });
 }
@@ -210,7 +208,7 @@ function roleLabel(role: UserRole): string {
         <section class="grid gap-6 xl:grid-cols-[1fr_.85fr]">
             <form
                 class="cloud-panel grid gap-4 p-5 md:grid-cols-4"
-                @submit.prevent="settingsForm.patch('/admin/settings')"
+                @submit.prevent="saveSettings"
             >
                 <label class="text-sm font-medium">
                     Upload limit
@@ -341,90 +339,103 @@ function roleLabel(role: UserRole): string {
                             v-if="isSuperAdminLocked(user)"
                             class="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300"
                         >
-                            Only a super admin can edit this account.
+                            This super admin account is protected and cannot be
+                            edited here.
                         </p>
                     </div>
 
-                    <label class="text-xs font-semibold text-ink-600 dark:text-ink-300">
+                    <label
+                        v-if="!isSuperAdminLocked(user)"
+                        class="text-xs font-semibold text-ink-600 dark:text-ink-300"
+                    >
                         Role
                         <select
                             v-model="userEdits[user.id].role"
                             class="mt-2 w-full rounded-full border border-line bg-white px-3 py-2 text-sm text-ink-950 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/10 dark:text-white"
-                            :disabled="isSuperAdminLocked(user)"
                         >
                             <option value="member">Member</option>
                             <option value="admin">Admin</option>
-                            <option
-                                v-if="canCreateSuperAdmin || user.role === 'super_admin'"
-                                value="super_admin"
-                            >
-                                Super admin
-                            </option>
                         </select>
                     </label>
+                    <div
+                        v-else
+                        class="text-xs font-semibold text-ink-600 dark:text-ink-300"
+                    >
+                        Role
+                        <div
+                            class="mt-2 rounded-full border border-line bg-ink-950/5 px-3 py-2 text-sm text-ink-950 dark:bg-white/10 dark:text-white"
+                        >
+                            Super admin
+                        </div>
+                    </div>
 
-                    <label class="text-xs font-semibold text-ink-600 dark:text-ink-300">
+                    <label
+                        v-if="!isSuperAdminLocked(user)"
+                        class="text-xs font-semibold text-ink-600 dark:text-ink-300"
+                    >
                         Status
                         <select
                             v-model="userEdits[user.id].is_active"
                             class="mt-2 w-full rounded-full border border-line bg-white px-3 py-2 text-sm text-ink-950 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/10 dark:text-white"
-                            :disabled="isSuperAdminLocked(user)"
                         >
                             <option :value="true">Active</option>
                             <option :value="false">Inactive</option>
                         </select>
                     </label>
+                    <div
+                        v-else
+                        class="text-xs font-semibold text-ink-600 dark:text-ink-300"
+                    >
+                        Status
+                        <div
+                            class="mt-2 rounded-full border border-line bg-ink-950/5 px-3 py-2 text-sm text-ink-950 dark:bg-white/10 dark:text-white"
+                        >
+                            Active
+                        </div>
+                    </div>
 
                     <div class="flex flex-wrap justify-start gap-2 xl:justify-end">
-                        <Button
-                            type="button"
+                        <Badge
+                            v-if="isSuperAdminLocked(user)"
                             variant="outline"
-                            class="gap-2"
-                            :disabled="!userHasChanges(user)"
-                            @click="resetUserEdit(user)"
+                            class="h-10 rounded-full px-4"
                         >
-                            <RotateCcw class="h-4 w-4" />
-                            Revert
-                        </Button>
-                        <Button
-                            type="submit"
-                            class="gap-2"
-                            :disabled="
-                                !userHasChanges(user) ||
-                                isSuperAdminLocked(user) ||
-                                isSelfDisable(user)
-                            "
-                        >
-                            <Save class="h-4 w-4" />
-                            Save
-                        </Button>
-                        <p
-                            v-if="isSelfDisable(user)"
-                            class="basis-full text-xs font-medium text-red-600 xl:text-right"
-                        >
-                            You cannot disable your own account.
-                        </p>
+                            Protected
+                        </Badge>
+                        <template v-else>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                class="gap-2"
+                                :disabled="!userHasChanges(user)"
+                                @click="resetUserEdit(user)"
+                            >
+                                <RotateCcw class="h-4 w-4" />
+                                Revert
+                            </Button>
+                            <Button
+                                type="submit"
+                                class="gap-2"
+                                :disabled="
+                                    !userHasChanges(user) || isSelfDisable(user)
+                                "
+                            >
+                                <Save class="h-4 w-4" />
+                                Save
+                            </Button>
+                            <p
+                                v-if="isSelfDisable(user)"
+                                class="basis-full text-xs font-medium text-red-600 xl:text-right"
+                            >
+                                You cannot disable your own account.
+                            </p>
+                        </template>
                     </div>
                 </form>
             </div>
 
-            <div
-                v-if="users.links.length > 3"
-                class="flex flex-wrap gap-2 border-t border-line p-5"
-            >
-                <button
-                    v-for="link in users.links"
-                    :key="link.label"
-                    type="button"
-                    class="rounded-full border border-line px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                    :class="{
-                        'bg-ink-950 text-white dark:bg-white dark:text-ink-950':
-                            link.active,
-                    }"
-                    :disabled="link.url === null"
-                    v-html="link.label"
-                    @click="link.url && router.visit(link.url)"
-                />
+            <div v-if="users.links.length > 3" class="border-t border-line p-5">
+                <PaginationLinks :links="users.links" />
             </div>
         </section>
 

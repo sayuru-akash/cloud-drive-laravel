@@ -2,6 +2,7 @@
 
 use App\Models\AuditLog;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Hash;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -21,7 +22,6 @@ it('renders admin user management with create-user permissions', function (): vo
         ->assertInertia(fn (Assert $page) => $page
             ->component('admin/Index')
             ->where('currentUserId', $admin->id)
-            ->where('canCreateSuperAdmin', false)
             ->has('users.data', 2)
             ->where('users.data.0.email', $member->email)
             ->where('users.data.0.two_factor_enabled', true)
@@ -75,6 +75,7 @@ it('blocks regular admins from creating super admin users', function (): void {
     $admin = User::factory()->create(['role' => 'admin']);
 
     $this->actingAs($admin)
+        ->from('/admin')
         ->post('/admin/users', [
             'name' => 'Super Admin',
             'email' => 'super@example.com',
@@ -83,9 +84,29 @@ it('blocks regular admins from creating super admin users', function (): void {
             'password' => 'password',
             'password_confirmation' => 'password',
         ])
-        ->assertForbidden();
+        ->assertRedirect('/admin')
+        ->assertSessionHasErrors('role');
 
     expect(User::query()->where('email', 'super@example.com')->exists())->toBeFalse();
+});
+
+it('blocks super admins from creating another super admin user', function (): void {
+    $superAdmin = User::factory()->create(['role' => 'super_admin']);
+
+    $this->actingAs($superAdmin)
+        ->from('/admin')
+        ->post('/admin/users', [
+            'name' => 'Second Super Admin',
+            'email' => 'second-super@example.com',
+            'role' => 'super_admin',
+            'is_active' => true,
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ])
+        ->assertRedirect('/admin')
+        ->assertSessionHasErrors('role');
+
+    expect(User::query()->where('email', 'second-super@example.com')->exists())->toBeFalse();
 });
 
 it('blocks members from creating users', function (): void {
@@ -108,25 +129,51 @@ it('blocks admins from promoting users to super admin', function (): void {
     $member = User::factory()->create(['role' => 'member']);
 
     $this->actingAs($admin)
+        ->from('/admin')
         ->patch("/admin/users/{$member->id}", [
             'role' => 'super_admin',
             'is_active' => true,
         ])
-        ->assertForbidden();
+        ->assertRedirect('/admin')
+        ->assertSessionHasErrors('role');
 
     expect($member->fresh()->role)->toBe('member');
 });
 
-it('keeps at least one active super admin account', function (): void {
+it('blocks super admins from promoting users to super admin', function (): void {
     $superAdmin = User::factory()->create(['role' => 'super_admin', 'is_active' => true]);
+    $member = User::factory()->create(['role' => 'member']);
 
     $this->actingAs($superAdmin)
-        ->patch("/admin/users/{$superAdmin->id}", [
-            'role' => 'member',
+        ->from('/admin')
+        ->patch("/admin/users/{$member->id}", [
+            'role' => 'super_admin',
             'is_active' => true,
+        ])->assertRedirect('/admin')
+        ->assertSessionHasErrors('role');
+
+    expect($member->fresh()->role)->toBe('member');
+});
+
+it('blocks changes to the protected super admin account', function (): void {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $superAdmin = User::factory()->create(['role' => 'super_admin', 'is_active' => true]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/users/{$superAdmin->id}", [
+            'role' => 'admin',
+            'is_active' => false,
         ])
         ->assertStatus(422);
 
     expect($superAdmin->fresh()->role)->toBe('super_admin')
-        ->and($superAdmin->fresh()->is_active)->toBeTrue();
+        ->and($superAdmin->fresh()->is_active)->toBeTrue()
+        ->and(AuditLog::query()->where('action_type', 'user.updated')->where('resource_id', (string) $superAdmin->id)->exists())->toBeFalse();
+});
+
+it('enforces one super admin at the database level', function (): void {
+    User::factory()->create(['role' => 'super_admin']);
+
+    expect(fn () => User::factory()->create(['role' => 'super_admin']))
+        ->toThrow(QueryException::class);
 });

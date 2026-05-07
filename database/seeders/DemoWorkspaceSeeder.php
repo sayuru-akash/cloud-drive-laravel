@@ -10,22 +10,21 @@ use App\Models\FileVersion;
 use App\Models\Folder;
 use App\Models\User;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
+use RuntimeException;
 
 class DemoWorkspaceSeeder extends Seeder
 {
     public function run(): void
     {
-        $user = User::query()->updateOrCreate(
-            ['email' => 'admin@example.com'],
-            [
-                'name' => 'Sayuru Admin',
-                'password' => Hash::make('password'),
-                'role' => 'super_admin',
-                'is_active' => true,
-                'email_verified_at' => now(),
-            ],
-        );
+        $user = User::query()
+            ->where('role', 'super_admin')
+            ->where('is_active', true)
+            ->oldest()
+            ->first();
+
+        if (! $user) {
+            throw new RuntimeException('Create an active super admin account before running the demo workspace seeder.');
+        }
 
         foreach ([
             ['Product Assets', ResourceVisibility::Private],

@@ -143,7 +143,7 @@ import SeoHead from '@/components/SeoHead.vue';
                     </div>
                 </div>
             </section>
-            <BrandFooter class="pb-2" />
+            <BrandFooter class="mt-auto pb-2" />
         </div>
     </main>
 </template>

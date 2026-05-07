@@ -23,6 +23,15 @@ enum UserRole: string
         ];
     }
 
+    /** @return array<int, string> */
+    public static function assignableValues(): array
+    {
+        return [
+            self::Member->value,
+            self::Admin->value,
+        ];
+    }
+
     public static function isAdminValue(?string $role): bool
     {
         return in_array($role, self::adminValues(), true);

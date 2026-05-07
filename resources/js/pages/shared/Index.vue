@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
+import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
 import {
     Dialog,
@@ -49,6 +50,7 @@ const copiedShareId = ref<string | null>(null);
 const failedShareId = ref<string | null>(null);
 const revokeTarget = ref<ShareItem | null>(null);
 const revokeProcessing = ref(false);
+const sharesRefreshProps = ['shares', 'flash'];
 
 function resetFlashCopyState() {
     window.setTimeout(() => {
@@ -102,6 +104,7 @@ function confirmRevoke() {
         `/shares/${revokeTarget.value.id}/revoke`,
         {},
         {
+            only: sharesRefreshProps,
             preserveScroll: true,
             onStart: () => {
                 revokeProcessing.value = true;
@@ -116,9 +119,6 @@ function confirmRevoke() {
     );
 }
 
-function paginationLabel(label: string) {
-    return label.replace('&laquo; Previous', 'Previous').replace('Next &raquo;', 'Next');
-}
 </script>
 
 <template>
@@ -300,26 +300,7 @@ function paginationLabel(label: string) {
                 No share links yet.
             </p>
         </section>
-        <div
-            v-if="shares.links && shares.links.length > 3"
-            class="flex flex-wrap gap-2"
-        >
-            <Link
-                v-for="link in shares.links"
-                :key="link.label"
-                :href="link.url ?? '#'"
-                class="rounded-full border border-line px-3 py-1.5 text-sm"
-                :class="
-                    link.active
-                        ? 'bg-ink-950 text-white dark:bg-white dark:text-ink-950'
-                        : link.url
-                          ? 'bg-white text-ink-700 dark:bg-white/10 dark:text-white'
-                          : 'pointer-events-none opacity-40'
-                "
-            >
-                {{ paginationLabel(link.label) }}
-            </Link>
-        </div>
+        <PaginationLinks v-if="shares.links" :links="shares.links" />
         <Link
             href="/files"
             class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"

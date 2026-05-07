@@ -7,13 +7,13 @@ use App\Models\DriveFile;
 use App\Models\Folder;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class DriveQueryService
 {
     public function __construct(private readonly DrivePermissionService $permissions) {}
 
-    /** @return array{folders:Collection<int, Folder>, files:Collection<int, DriveFile>} */
+    /** @return array{folders:LengthAwarePaginator<int, Folder>, files:LengthAwarePaginator<int, DriveFile>} */
     public function browse(User $user, ?string $folderId, array $filters): array
     {
         $folderQuery = Folder::query()
@@ -55,8 +55,13 @@ class DriveQueryService
         };
 
         return [
-            'folders' => $folderQuery->get(),
-            'files' => $fileQuery->orderBy($column, $direction)->get(),
+            'folders' => $folderQuery
+                ->paginate(50, ['*'], 'folders_page')
+                ->withQueryString(),
+            'files' => $fileQuery
+                ->orderBy($column, $direction)
+                ->paginate(50, ['*'], 'files_page')
+                ->withQueryString(),
         ];
     }
 

@@ -19,6 +19,7 @@ import {
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
+import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
 import {
     Dialog,
@@ -70,12 +71,19 @@ type UploadQueueItem = {
         | 'error';
     message: string;
 };
+type Paginated<T> = {
+    data: T[];
+    links: Array<{ url: string | null; label: string; active: boolean }>;
+    from: number | null;
+    to: number | null;
+    total: number;
+};
 
 const props = defineProps<{
     folderId: string | null;
     breadcrumbs: Array<{ id: string; name: string }>;
-    folders: FolderItem[];
-    files: FileItem[];
+    folders: Paginated<FolderItem>;
+    files: Paginated<FileItem>;
     filters: { q?: string; visibility?: string; type?: string; sort?: string };
     settings: {
         maxUploadSizeBytes: number;
@@ -97,6 +105,7 @@ const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
 const accessValue = ref('private');
 const accessProcessing = ref(false);
+const driveRefreshProps = ['files', 'folders', 'breadcrumbs', 'flash'];
 const folderForm = useForm({
     name: '',
     parent_folder_id: props.folderId,
@@ -116,6 +125,8 @@ const activeFilters = computed(
             Boolean,
         ).length,
 );
+const folderItems = computed(() => props.folders.data);
+const fileItems = computed(() => props.files.data);
 const visibleUploads = computed(() =>
     uploadQueue.value.filter((item) => item.status !== 'done').slice(-5),
 );
@@ -173,20 +184,27 @@ function updateFilters(key: string, value: string) {
 function createFolder() {
     folderForm.parent_folder_id = props.folderId;
     folderForm.post('/folders', {
+        only: driveRefreshProps,
         preserveScroll: true,
         onSuccess: () => folderForm.reset('name'),
     });
 }
 
 function updateFile(file: FileItem, changes: Record<string, string | null>) {
-    router.patch(`/files/${file.id}`, changes, { preserveScroll: true });
+    router.patch(`/files/${file.id}`, changes, {
+        only: driveRefreshProps,
+        preserveScroll: true,
+    });
 }
 
 function updateFolder(
     folder: FolderItem,
     changes: Record<string, string | null>,
 ) {
-    router.patch(`/folders/${folder.id}`, changes, { preserveScroll: true });
+    router.patch(`/folders/${folder.id}`, changes, {
+        only: driveRefreshProps,
+        preserveScroll: true,
+    });
 }
 
 function renameFile(file: FileItem) {
@@ -246,7 +264,10 @@ function confirmTrash() {
         target.kind === 'file'
             ? `/files/${target.item.id}`
             : `/folders/${target.item.id}`,
-        { preserveScroll: true },
+        {
+            only: driveRefreshProps,
+            preserveScroll: true,
+        },
     );
     closeTrashDialog();
 }
@@ -287,6 +308,7 @@ function submitAccess() {
         url,
         { visibility: accessValue.value },
         {
+            only: driveRefreshProps,
             preserveScroll: true,
             onStart: () => {
                 accessProcessing.value = true;
@@ -317,6 +339,7 @@ function submitShare() {
     }
 
     shareForm.post(`/files/${shareTarget.value.id}/shares`, {
+        only: ['flash'],
         preserveScroll: true,
         onSuccess: closeShareDialog,
     });
@@ -591,7 +614,7 @@ async function uploadFiles(list: FileList) {
         },
     );
 
-    router.reload({ only: ['files', 'folders'] });
+    router.reload({ only: driveRefreshProps });
 }
 
 function handleDrop(event: DragEvent) {
@@ -839,7 +862,7 @@ function handleInput(event: Event) {
                 class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
             >
                 <div
-                    v-for="folder in folders"
+                    v-for="folder in folderItems"
                     :key="folder.id"
                     class="rounded-[1.5rem] border border-line bg-white/70 p-4 dark:bg-white/10"
                 >
@@ -882,7 +905,7 @@ function handleInput(event: Event) {
                     </div>
                 </div>
                 <div
-                    v-for="file in files"
+                    v-for="file in fileItems"
                     :key="file.id"
                     class="rounded-[1.5rem] border border-line bg-white/70 p-4 dark:bg-white/10"
                 >
@@ -943,7 +966,7 @@ function handleInput(event: Event) {
 
             <div v-else class="divide-y divide-line">
                 <div
-                    v-for="folder in folders"
+                    v-for="folder in folderItems"
                     :key="folder.id"
                     class="grid gap-3 py-4 md:grid-cols-[1fr_auto_auto] md:items-center"
                 >
@@ -985,7 +1008,7 @@ function handleInput(event: Event) {
                     </div>
                 </div>
                 <div
-                    v-for="file in files"
+                    v-for="file in fileItems"
                     :key="file.id"
                     class="grid gap-3 py-4 md:grid-cols-[1fr_auto_auto_auto] md:items-center"
                 >
@@ -1042,11 +1065,29 @@ function handleInput(event: Event) {
                     </div>
                 </div>
                 <p
-                    v-if="folders.length + files.length === 0"
+                    v-if="folderItems.length + fileItems.length === 0"
                     class="py-12 text-center text-sm text-ink-600 dark:text-ink-300"
                 >
                     Drop files here or create a folder.
                 </p>
+            </div>
+        </section>
+
+        <section
+            v-if="folders.links.length > 3 || files.links.length > 3"
+            class="grid gap-3 md:grid-cols-2"
+        >
+            <div v-if="folders.links.length > 3" class="cloud-panel p-4">
+                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                    Folders
+                </p>
+                <PaginationLinks :links="folders.links" />
+            </div>
+            <div v-if="files.links.length > 3" class="cloud-panel p-4">
+                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                    Files
+                </p>
+                <PaginationLinks :links="files.links" />
             </div>
         </section>
 

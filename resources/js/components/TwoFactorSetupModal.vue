@@ -40,6 +40,12 @@ const { qrCodeSvg, manualSetupKey, clearSetupData, fetchSetupData, errors } =
 const showVerificationStep = ref(false);
 const code = ref<string>('');
 const copySetupKeyStatus = ref<'idle' | 'copied' | 'blocked'>('idle');
+const securityRefreshProps = [
+    'canManageTwoFactor',
+    'requiresConfirmation',
+    'twoFactorEnabled',
+    'flash',
+];
 
 const pinInputContainerRef = useTemplateRef('pinInputContainerRef');
 
@@ -274,6 +280,10 @@ watch(
                     <Form
                         v-bind="confirm.form()"
                         error-bag="confirmTwoFactorAuthentication"
+                        :options="{
+                            only: securityRefreshProps,
+                            preserveScroll: true,
+                        }"
                         reset-on-error
                         @finish="code = ''"
                         @success="isOpen = false"

@@ -4,10 +4,12 @@ use App\Enums\FileStatus;
 use App\Enums\ResourceVisibility;
 use App\Enums\ShareMode;
 use App\Enums\ShareResourceType;
+use App\Enums\UploadStatus;
 use App\Models\DriveFile;
 use App\Models\FileVersion;
 use App\Models\Folder;
 use App\Models\ShareLink;
+use App\Models\Upload;
 use App\Models\User;
 use App\Services\ObjectStorageService;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -173,6 +175,37 @@ it('does not restore a cancelled upload as a ready file', function (): void {
 
     expect($file->fresh()->is_deleted)->toBeFalse()
         ->and($file->fresh()->status)->toBe(FileStatus::Failed);
+});
+
+it('cancels an active uploading record and moves its pending file to trash', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'stuck.bin',
+        'display_name' => 'stuck.bin',
+        'mime_type' => 'application/octet-stream',
+        'size_bytes' => 12,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $upload = Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Uploading,
+        'storage_key' => 'objects/stuck.bin',
+        'content_type' => 'application/octet-stream',
+        'size_bytes' => 12,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/cancel-upload")
+        ->assertOk();
+
+    expect($upload->fresh()->upload_status)->toBe(UploadStatus::Cancelled)
+        ->and($file->fresh()->status)->toBe(FileStatus::Failed)
+        ->and($file->fresh()->is_deleted)->toBeTrue();
 });
 
 it('blocks sharing files that are not ready for download', function (): void {

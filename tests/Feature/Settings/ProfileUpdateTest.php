@@ -4,6 +4,7 @@ namespace Tests\Feature\Settings;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class ProfileUpdateTest extends TestCase
@@ -18,7 +19,24 @@ class ProfileUpdateTest extends TestCase
             ->actingAs($user)
             ->get(route('profile.edit'));
 
-        $response->assertOk();
+        $response
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canDeleteAccount', true)
+            );
+    }
+
+    public function test_super_admin_profile_page_hides_account_deletion(): void
+    {
+        $user = User::factory()->create(['role' => 'super_admin']);
+
+        $this
+            ->actingAs($user)
+            ->get(route('profile.edit'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canDeleteAccount', false)
+            );
     }
 
     public function test_legacy_theme_settings_page_is_not_available(): void
@@ -91,6 +109,7 @@ class ProfileUpdateTest extends TestCase
             ->actingAs($user)
             ->delete(route('profile.destroy'), [
                 'password' => 'password',
+                'delete_confirmation' => 'DELETE MY ACCOUNT',
             ]);
 
         $response
@@ -110,6 +129,7 @@ class ProfileUpdateTest extends TestCase
             ->from(route('profile.edit'))
             ->delete(route('profile.destroy'), [
                 'password' => 'wrong-password',
+                'delete_confirmation' => 'DELETE MY ACCOUNT',
             ]);
 
         $response
@@ -117,5 +137,41 @@ class ProfileUpdateTest extends TestCase
             ->assertRedirect(route('profile.edit'));
 
         $this->assertNotNull($user->fresh());
+    }
+
+    public function test_delete_account_requires_typed_confirmation(): void
+    {
+        $user = User::factory()->create();
+
+        $this
+            ->actingAs($user)
+            ->from(route('profile.edit'))
+            ->delete(route('profile.destroy'), [
+                'password' => 'password',
+                'delete_confirmation' => 'delete my account',
+            ])
+            ->assertSessionHasErrors('delete_confirmation')
+            ->assertRedirect(route('profile.edit'));
+
+        $this->assertNotNull($user->fresh());
+        $this->assertAuthenticatedAs($user);
+    }
+
+    public function test_super_admin_cannot_delete_their_account(): void
+    {
+        $user = User::factory()->create(['role' => 'super_admin']);
+
+        $this
+            ->actingAs($user)
+            ->from(route('profile.edit'))
+            ->delete(route('profile.destroy'), [
+                'password' => 'password',
+                'delete_confirmation' => 'DELETE MY ACCOUNT',
+            ])
+            ->assertSessionHasErrors('account')
+            ->assertRedirect(route('profile.edit'));
+
+        $this->assertNotNull($user->fresh());
+        $this->assertAuthenticatedAs($user);
     }
 }

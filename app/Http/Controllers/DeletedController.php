@@ -29,12 +29,14 @@ class DeletedController extends Controller
                 ->when(! $admin, fn ($query) => $query->where('owner_user_id', $user->id))
                 ->where('is_deleted', true)
                 ->latest('deleted_at')
-                ->get(),
+                ->paginate(30, ['*'], 'files_page')
+                ->withQueryString(),
             'folders' => Folder::query()
                 ->when(! $admin, fn ($query) => $query->where('owner_user_id', $user->id))
                 ->where('is_deleted', true)
                 ->latest('deleted_at')
-                ->get(),
+                ->paginate(30, ['*'], 'folders_page')
+                ->withQueryString(),
             'canHardDelete' => $admin,
             'retentionDays' => $settings->values()['retentionDays'],
         ]);

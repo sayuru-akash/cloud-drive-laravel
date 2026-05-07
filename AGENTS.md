@@ -42,7 +42,7 @@ database/
 ├── migrations/              # Users + drive tables (folders, files, file_versions, uploads, share_links, audit_logs, app_settings)
 └── seeders/
     ├── DatabaseSeeder.php
-    └── DemoWorkspaceSeeder.php   # admin@example.com / password, demo files/folders/audit
+    └── DemoWorkspaceSeeder.php   # Demo files/folders/audit for an existing super admin
 
 resources/js/
 ├── app.ts                   # Inertia app boot: layouts, theme init, flash toast
@@ -179,7 +179,6 @@ php artisan migrate --force
 **Demo seed (never in production):**
 ```bash
 php artisan migrate:fresh && php artisan db:seed --class=DemoWorkspaceSeeder
-# Login: admin@example.com / password
 ```
 
 ## Coding Conventions

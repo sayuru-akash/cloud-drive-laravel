@@ -11,7 +11,7 @@ import SeoHead from '@/components/SeoHead.vue';
         description="How Cloud Drive handles metadata, direct Backblaze B2 file transfers, signed download links, and audit logs."
         path="/privacy"
     />
-    <main class="min-h-screen bg-background px-4 py-8">
+    <main class="flex min-h-screen flex-col bg-background px-4 py-8">
         <article class="cloud-panel mx-auto max-w-3xl p-8">
             <Link
                 href="/"
@@ -47,6 +47,6 @@ import SeoHead from '@/components/SeoHead.vue';
                 </p>
             </div>
         </article>
-        <BrandFooter class="mx-auto mt-8 max-w-3xl" />
+        <BrandFooter class="mx-auto mt-auto max-w-3xl pt-8" />
     </main>
 </template>

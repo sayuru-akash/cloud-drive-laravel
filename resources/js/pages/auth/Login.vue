@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Form, Head } from '@inertiajs/vue3';
+import { ShieldCheck } from 'lucide-vue-next';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import TextLink from '@/components/TextLink.vue';
@@ -28,8 +29,15 @@ defineProps<{
     <Head title="Log in" />
 
     <div
+        class="flex items-start gap-3 rounded-xl border border-line bg-muted/40 p-3 text-sm text-muted-foreground"
+    >
+        <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+        <p>Codezela Technologies employees with login access only.</p>
+    </div>
+
+    <div
         v-if="status"
-        class="mb-4 text-center text-sm font-medium text-green-600"
+        class="text-center text-sm font-medium text-green-600"
     >
         {{ status }}
     </div>

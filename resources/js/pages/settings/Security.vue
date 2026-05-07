@@ -47,6 +47,12 @@ defineOptions({
 
 const { hasSetupData, clearTwoFactorAuthData } = useTwoFactorAuth();
 const showSetupModal = ref<boolean>(false);
+const securityRefreshProps = [
+    'canManageTwoFactor',
+    'requiresConfirmation',
+    'twoFactorEnabled',
+    'flash',
+];
 
 onUnmounted(() => clearTwoFactorAuthData());
 </script>
@@ -203,6 +209,10 @@ onUnmounted(() => clearTwoFactorAuthData());
                     <Form
                         v-else
                         v-bind="enable.form()"
+                        :options="{
+                            only: securityRefreshProps,
+                            preserveScroll: true,
+                        }"
                         @success="showSetupModal = true"
                         #default="{ processing }"
                     >
@@ -225,7 +235,14 @@ onUnmounted(() => clearTwoFactorAuthData());
                                     requirement and clears recovery codes.
                                 </p>
                             </div>
-                            <Form v-bind="disable.form()" #default="{ processing }">
+                            <Form
+                                v-bind="disable.form()"
+                                :options="{
+                                    only: securityRefreshProps,
+                                    preserveScroll: true,
+                                }"
+                                #default="{ processing }"
+                            >
                                 <Button
                                     variant="destructive"
                                     type="submit"

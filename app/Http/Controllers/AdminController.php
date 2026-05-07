@@ -34,7 +34,6 @@ class AdminController extends Controller
                 ->withQueryString(),
             'settings' => $settings->values(),
             'currentUserId' => $request->user()->id,
-            'canCreateSuperAdmin' => $request->user()->role === UserRole::SuperAdmin->value,
         ]);
     }
 
@@ -43,12 +42,10 @@ class AdminController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class)],
-            'role' => ['required', Rule::in(UserRole::values())],
+            'role' => ['required', Rule::in(UserRole::assignableValues())],
             'is_active' => ['required', 'boolean'],
             'password' => ['required', 'string', Password::default(), 'confirmed'],
         ]);
-
-        abort_if($data['role'] === UserRole::SuperAdmin->value && $request->user()->role !== UserRole::SuperAdmin->value, 403);
 
         $user = new User;
         $user->forceFill([
@@ -71,26 +68,14 @@ class AdminController extends Controller
 
     public function updateUser(Request $request, User $user, AuditLogger $audit): RedirectResponse
     {
+        abort_if($user->role === UserRole::SuperAdmin->value, 422, 'The super admin account cannot be changed from user management.');
+
         $data = $request->validate([
-            'role' => ['required', Rule::in(UserRole::values())],
+            'role' => ['required', Rule::in(UserRole::assignableValues())],
             'is_active' => ['required', 'boolean'],
         ]);
 
-        abort_if($user->role === UserRole::SuperAdmin->value && $request->user()->role !== UserRole::SuperAdmin->value, 403);
-        abort_if($data['role'] === UserRole::SuperAdmin->value && $request->user()->role !== UserRole::SuperAdmin->value, 403);
         abort_if((int) $request->user()->id === (int) $user->id && ! $data['is_active'], 422, 'You cannot disable your own account.');
-
-        $activeSuperAdminsAfterUpdate = User::query()
-            ->where('role', 'super_admin')
-            ->where('is_active', true)
-            ->whereKeyNot($user->id)
-            ->count();
-
-        if ($data['role'] === UserRole::SuperAdmin->value && $data['is_active']) {
-            $activeSuperAdminsAfterUpdate++;
-        }
-
-        abort_if($activeSuperAdminsAfterUpdate === 0, 422, 'At least one active super admin is required.');
 
         $user->update($data);
         $audit->log('user.updated', 'user', (string) $user->id, $data, $request);

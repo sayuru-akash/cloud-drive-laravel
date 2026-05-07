@@ -5,6 +5,7 @@ namespace App\Http\Requests\Settings;
 use App\Concerns\PasswordValidationRules;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ProfileDeleteRequest extends FormRequest
 {
@@ -19,6 +20,7 @@ class ProfileDeleteRequest extends FormRequest
     {
         return [
             'password' => $this->currentPasswordRules(),
+            'delete_confirmation' => ['required', 'string', Rule::in(['DELETE MY ACCOUNT'])],
         ];
     }
 }

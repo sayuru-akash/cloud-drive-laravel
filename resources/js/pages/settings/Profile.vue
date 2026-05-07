@@ -13,6 +13,7 @@ import { send } from '@/routes/verification';
 
 type Props = {
     mustVerifyEmail: boolean;
+    canDeleteAccount: boolean;
     status?: string;
 };
 
@@ -107,5 +108,12 @@ const user = computed(() => page.props.auth.user);
         </Form>
     </div>
 
-    <DeleteUser />
+    <DeleteUser v-if="canDeleteAccount" />
+    <div
+        v-else
+        class="rounded-lg border border-line bg-muted/30 p-4 text-sm text-muted-foreground"
+    >
+        The super admin account is protected and cannot be deleted from profile
+        settings.
+    </div>
 </template>

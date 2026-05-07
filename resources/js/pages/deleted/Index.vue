@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { File, Folder, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
+import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import {
     Dialog,
     DialogContent,
@@ -18,15 +19,23 @@ type DeletedFolder = { id: string; name: string; deleted_at: string };
 type DeleteTarget =
     | { kind: 'file'; item: DeletedFile }
     | { kind: 'folder'; item: DeletedFolder };
+type Paginated<T> = {
+    data: T[];
+    links: Array<{ url: string | null; label: string; active: boolean }>;
+};
 
-defineProps<{
-    files: Array<{ id: string; display_name: string; deleted_at: string }>;
-    folders: Array<{ id: string; name: string; deleted_at: string }>;
+const props = defineProps<{
+    files: Paginated<DeletedFile>;
+    folders: Paginated<DeletedFolder>;
     canHardDelete: boolean;
     retentionDays: number;
 }>();
 
+const fileItems = computed(() => props.files.data);
+const folderItems = computed(() => props.folders.data);
 const deleteTarget = ref<DeleteTarget | null>(null);
+const deleteProcessing = ref(false);
+const deletedRefreshProps = ['files', 'folders', 'flash'];
 const deleteDescription = computed(() => {
     if (! deleteTarget.value) {
         return '';
@@ -48,7 +57,33 @@ function hardDeleteFolder(folder: DeletedFolder) {
 }
 
 function closeDeleteDialog() {
+    if (deleteProcessing.value) {
+        return;
+    }
+
     deleteTarget.value = null;
+}
+
+function restoreFile(file: DeletedFile) {
+    router.patch(
+        `/deleted/files/${file.id}/restore`,
+        {},
+        {
+            only: deletedRefreshProps,
+            preserveScroll: true,
+        },
+    );
+}
+
+function restoreFolder(folder: DeletedFolder) {
+    router.patch(
+        `/deleted/folders/${folder.id}/restore`,
+        {},
+        {
+            only: deletedRefreshProps,
+            preserveScroll: true,
+        },
+    );
 }
 
 function confirmHardDelete() {
@@ -62,9 +97,20 @@ function confirmHardDelete() {
         target.kind === 'file'
             ? `/deleted/files/${target.item.id}/hard-delete`
             : `/deleted/folders/${target.item.id}/hard-delete`,
-        { preserveScroll: true },
+        {
+            only: deletedRefreshProps,
+            preserveScroll: true,
+            onStart: () => {
+                deleteProcessing.value = true;
+            },
+            onSuccess: () => {
+                deleteTarget.value = null;
+            },
+            onFinish: () => {
+                deleteProcessing.value = false;
+            },
+        },
     );
-    closeDeleteDialog();
 }
 </script>
 
@@ -77,7 +123,7 @@ function confirmHardDelete() {
         />
         <section class="cloud-panel divide-y divide-line p-5">
             <div
-                v-for="folder in folders"
+                v-for="folder in folderItems"
                 :key="folder.id"
                 class="flex items-center justify-between gap-4 py-4"
             >
@@ -96,11 +142,7 @@ function confirmHardDelete() {
                     <button
                         type="button"
                         class="text-brand"
-                        @click="
-                            router.patch(
-                                `/deleted/folders/${folder.id}/restore`,
-                            )
-                        "
+                        @click="restoreFolder(folder)"
                     >
                         Restore
                     </button>
@@ -115,7 +157,7 @@ function confirmHardDelete() {
                 </div>
             </div>
             <div
-                v-for="file in files"
+                v-for="file in fileItems"
                 :key="file.id"
                 class="flex items-center justify-between gap-4 py-4"
             >
@@ -134,9 +176,7 @@ function confirmHardDelete() {
                     <button
                         type="button"
                         class="text-brand"
-                        @click="
-                            router.patch(`/deleted/files/${file.id}/restore`)
-                        "
+                        @click="restoreFile(file)"
                     >
                         Restore
                     </button>
@@ -151,11 +191,29 @@ function confirmHardDelete() {
                 </div>
             </div>
             <p
-                v-if="files.length + folders.length === 0"
+                v-if="fileItems.length + folderItems.length === 0"
                 class="py-10 text-center text-sm text-ink-600 dark:text-ink-300"
             >
                 Trash is empty.
             </p>
+        </section>
+
+        <section
+            v-if="folders.links.length > 3 || files.links.length > 3"
+            class="grid gap-3 md:grid-cols-2"
+        >
+            <div v-if="folders.links.length > 3" class="cloud-panel p-4">
+                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                    Folders
+                </p>
+                <PaginationLinks :links="folders.links" />
+            </div>
+            <div v-if="files.links.length > 3" class="cloud-panel p-4">
+                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                    Files
+                </p>
+                <PaginationLinks :links="files.links" />
+            </div>
         </section>
 
         <Dialog
@@ -173,6 +231,7 @@ function confirmHardDelete() {
                     <button
                         type="button"
                         class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                        :disabled="deleteProcessing"
                         @click="closeDeleteDialog"
                     >
                         Cancel
@@ -180,9 +239,10 @@ function confirmHardDelete() {
                     <button
                         type="button"
                         class="cloud-button bg-red-600 text-white hover:bg-red-700"
+                        :disabled="deleteProcessing"
                         @click="confirmHardDelete"
                     >
-                        Delete forever
+                        {{ deleteProcessing ? 'Deleting' : 'Delete forever' }}
                     </button>
                 </DialogFooter>
             </DialogContent>

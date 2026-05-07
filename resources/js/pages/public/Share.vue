@@ -68,6 +68,6 @@ const unavailableMessage = computed(() => {
                 </template>
             </section>
         </div>
-        <BrandFooter />
+        <BrandFooter class="mt-auto" />
     </main>
 </template>

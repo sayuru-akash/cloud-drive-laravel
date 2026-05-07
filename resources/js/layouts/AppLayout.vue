@@ -52,7 +52,7 @@ function signOut() {
     </Head>
     <div class="min-h-screen bg-background">
         <div
-            class="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-4 md:px-6 lg:flex-row lg:px-10"
+            class="mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-7xl flex-col gap-6 px-4 py-4 md:px-6 lg:flex-row lg:px-10"
         >
             <div
                 class="mb-2 flex flex-col gap-4 rounded-[1.75rem] border border-line bg-white/78 p-4 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.52)] backdrop-blur lg:hidden dark:bg-white/10"
@@ -177,8 +177,10 @@ function signOut() {
                 </div>
             </aside>
 
-            <main class="min-w-0 flex-1">
-                <slot />
+            <main class="flex min-w-0 flex-1 flex-col">
+                <div class="flex-1">
+                    <slot />
+                </div>
                 <BrandFooter class="mt-10 pb-2" />
             </main>
         </div>

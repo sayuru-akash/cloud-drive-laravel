@@ -154,7 +154,13 @@ class FileUploadController extends Controller
     public function cancel(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AuditLogger $audit): JsonResponse
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
-        $upload = $file->uploads()->where('upload_status', UploadStatus::Initiated)->latest()->first();
+        $upload = $file->uploads()
+            ->whereIn('upload_status', [
+                UploadStatus::Initiated->value,
+                UploadStatus::Uploading->value,
+            ])
+            ->latest()
+            ->first();
 
         if ($upload) {
             if ($upload->provider_upload_id) {
