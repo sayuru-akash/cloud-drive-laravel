@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\FileStatus;
 use App\Enums\ShareMode;
 use App\Enums\ShareResourceType;
 use App\Models\DriveFile;
@@ -30,6 +31,7 @@ class ShareLinkController extends Controller
     public function store(Request $request, DriveFile $file, DrivePermissionService $permissions, AppSettingsService $settings, AuditLogger $audit): RedirectResponse
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
+        abort_unless($file->status === FileStatus::Ready && ! $file->is_deleted && $file->current_version_id, 422, 'Only ready files can be shared.');
         $data = $request->validate(['expires_days' => ['nullable', 'integer', 'min:1', 'max:90']]);
         $days = (int) ($data['expires_days'] ?? $settings->values()['shareExpiryDays']);
         $token = Str::random(48);

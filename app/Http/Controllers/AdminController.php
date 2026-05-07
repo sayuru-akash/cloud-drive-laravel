@@ -26,7 +26,23 @@ class AdminController extends Controller
             'role' => ['required', 'in:member,admin,super_admin'],
             'is_active' => ['required', 'boolean'],
         ]);
+
+        abort_if($user->role === 'super_admin' && $request->user()->role !== 'super_admin', 403);
+        abort_if($data['role'] === 'super_admin' && $request->user()->role !== 'super_admin', 403);
         abort_if((int) $request->user()->id === (int) $user->id && ! $data['is_active'], 422, 'You cannot disable your own account.');
+
+        $activeSuperAdminsAfterUpdate = User::query()
+            ->where('role', 'super_admin')
+            ->where('is_active', true)
+            ->whereKeyNot($user->id)
+            ->count();
+
+        if ($data['role'] === 'super_admin' && $data['is_active']) {
+            $activeSuperAdminsAfterUpdate++;
+        }
+
+        abort_if($activeSuperAdminsAfterUpdate === 0, 422, 'At least one active super admin is required.');
+
         $user->update($data);
         $audit->log('user.updated', 'user', (string) $user->id, $data, $request);
 

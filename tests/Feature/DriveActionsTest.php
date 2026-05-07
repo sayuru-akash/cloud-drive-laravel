@@ -93,6 +93,16 @@ it('restores a deleted folder together with contained folders and files', functi
         'is_deleted' => true,
         'deleted_at' => now(),
     ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/inside.txt',
+        'size_bytes' => 12,
+        'mime_type' => 'text/plain',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $file->update(['current_version_id' => $version->id]);
 
     $this->actingAs($owner)
         ->patch("/deleted/folders/{$folder->id}/restore")
@@ -102,6 +112,49 @@ it('restores a deleted folder together with contained folders and files', functi
         ->and($child->fresh()->is_deleted)->toBeFalse()
         ->and($file->fresh()->is_deleted)->toBeFalse()
         ->and($file->fresh()->status)->toBe(FileStatus::Ready);
+});
+
+it('does not restore a cancelled upload as a ready file', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'cancelled.txt',
+        'display_name' => 'cancelled.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Failed,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now(),
+    ]);
+
+    $this->actingAs($owner)
+        ->patch("/deleted/files/{$file->id}/restore")
+        ->assertRedirect();
+
+    expect($file->fresh()->is_deleted)->toBeFalse()
+        ->and($file->fresh()->status)->toBe(FileStatus::Failed);
+});
+
+it('blocks sharing files that are not ready for download', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'pending.txt',
+        'display_name' => 'pending.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($owner)
+        ->post("/files/{$file->id}/shares")
+        ->assertStatus(422);
+
+    expect(ShareLink::query()->count())->toBe(0);
 });
 
 it('hard deletes a folder subtree with file versions and share links', function (): void {

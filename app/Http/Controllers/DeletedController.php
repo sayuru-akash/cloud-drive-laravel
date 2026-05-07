@@ -44,7 +44,11 @@ class DeletedController extends Controller
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
         abort_unless($permissions->isAdmin($request->user()) || ! $file->deleted_at || $file->deleted_at->addDays($settings->values()['retentionDays'])->isFuture(), 403);
-        $file->update(['is_deleted' => false, 'status' => FileStatus::Ready, 'deleted_at' => null]);
+        $file->update([
+            'is_deleted' => false,
+            'status' => $file->current_version_id ? FileStatus::Ready : FileStatus::Failed,
+            'deleted_at' => null,
+        ]);
         $audit->log('file.restored', 'file', $file->id, [], $request);
 
         return back()->with('success', 'File restored.');
@@ -57,7 +61,14 @@ class DeletedController extends Controller
         $folderIds = $drive->descendantFolderIds($folder->id);
 
         Folder::query()->whereIn('id', $folderIds)->update(['is_deleted' => false, 'deleted_at' => null]);
-        DriveFile::query()->whereIn('folder_id', $folderIds)->update(['is_deleted' => false, 'status' => FileStatus::Ready, 'deleted_at' => null]);
+        DriveFile::query()
+            ->whereIn('folder_id', $folderIds)
+            ->whereNotNull('current_version_id')
+            ->update(['is_deleted' => false, 'status' => FileStatus::Ready, 'deleted_at' => null]);
+        DriveFile::query()
+            ->whereIn('folder_id', $folderIds)
+            ->whereNull('current_version_id')
+            ->update(['is_deleted' => false, 'status' => FileStatus::Failed, 'deleted_at' => null]);
         $audit->log('folder.restored', 'folder', $folder->id, ['folderIds' => $folderIds], $request);
 
         return back()->with('success', 'Folder restored.');

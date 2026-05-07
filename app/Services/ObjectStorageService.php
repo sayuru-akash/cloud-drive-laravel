@@ -25,6 +25,15 @@ class ObjectStorageService
         return (string) config('drive.storage.bucket');
     }
 
+    public function isConfigured(): bool
+    {
+        return filled(config('drive.storage.endpoint'))
+            && filled(config('drive.storage.region'))
+            && filled(config('drive.storage.key_id'))
+            && filled(config('drive.storage.secret_key'))
+            && filled(config('drive.storage.bucket'));
+    }
+
     public function buildStorageKey(string $fileId, int $versionNumber, string $filename): string
     {
         $safe = strtolower(trim($filename));

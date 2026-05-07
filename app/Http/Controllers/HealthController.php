@@ -3,11 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Services\AppSettingsService;
+use App\Services\ObjectStorageService;
 use Illuminate\Http\JsonResponse;
 
 class HealthController extends Controller
 {
-    public function __invoke(AppSettingsService $settings): JsonResponse
+    public function __invoke(AppSettingsService $settings, ObjectStorageService $storage): JsonResponse
     {
         $values = $settings->values();
 
@@ -20,7 +21,7 @@ class HealthController extends Controller
             'defaultShareExpiryDays' => $values['shareExpiryDays'],
             'ready' => [
                 'database' => true,
-                'storageConfigured' => filled(config('drive.storage.endpoint')) && filled(config('drive.storage.bucket')),
+                'storageConfigured' => $storage->isConfigured(),
             ],
         ]);
     }

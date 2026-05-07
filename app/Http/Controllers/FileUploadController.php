@@ -22,6 +22,8 @@ class FileUploadController extends Controller
 {
     public function initiate(Request $request, AppSettingsService $settings, ObjectStorageService $storage, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): JsonResponse
     {
+        abort_unless($storage->isConfigured(), 503, 'Object storage is not configured.');
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'size' => ['required', 'integer', 'min:1'],

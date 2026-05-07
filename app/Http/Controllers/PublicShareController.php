@@ -27,6 +27,7 @@ class PublicShareController extends Controller
     {
         $share = $this->resolve($token);
         abort_unless($share, 404);
+        abort_unless($storage->isConfigured(), 503, 'Object storage is not configured.');
         $file = $share->file()->with('currentVersion')->firstOrFail();
         $audit->log('file.downloaded', 'file', $file->id, ['publicShareId' => $share->id], request());
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\FileStatus;
 use App\Models\DriveFile;
+use App\Models\Folder;
 use App\Models\ShareLink;
 use App\Models\Upload;
 use App\Services\DrivePermissionService;
@@ -25,10 +26,15 @@ class DashboardController extends Controller
                     ->where('is_revoked', false)
                     ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
                     ->count(),
-                'trash' => $scope(DriveFile::query()->where('is_deleted', true))->count(),
+                'trash' => $scope(DriveFile::query()->where('is_deleted', true))->count()
+                    + $scope(Folder::query()->where('is_deleted', true))->count(),
                 'pending' => Upload::query()->where('initiated_by_user_id', $user->id)->whereIn('upload_status', ['initiated', 'uploading'])->count(),
             ],
-            'recentFiles' => $scope(DriveFile::query()->with('currentVersion')->latest('updated_at'))->limit(6)->get(),
+            'recentFiles' => $scope(DriveFile::query()
+                ->with('currentVersion')
+                ->where('is_deleted', false)
+                ->where('status', FileStatus::Ready)
+                ->latest('updated_at'))->limit(6)->get(),
             'recentUploads' => Upload::query()->with('file')->where('initiated_by_user_id', $user->id)->latest()->limit(5)->get(),
         ]);
     }

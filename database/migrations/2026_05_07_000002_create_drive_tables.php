@@ -18,7 +18,9 @@ return new class extends Migration
             $table->boolean('is_deleted')->default(false)->index();
             $table->timestamp('deleted_at')->nullable();
             $table->timestamps();
+        });
 
+        Schema::table('folders', function (Blueprint $table): void {
             $table->foreign('parent_folder_id')->references('id')->on('folders')->nullOnDelete();
         });
 

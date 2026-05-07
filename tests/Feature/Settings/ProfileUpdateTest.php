@@ -21,6 +21,18 @@ class ProfileUpdateTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_inactive_users_are_logged_out_before_accessing_profile_settings(): void
+    {
+        $user = User::factory()->create(['is_active' => false]);
+
+        $this
+            ->actingAs($user)
+            ->get(route('profile.edit'))
+            ->assertRedirect(route('login'));
+
+        $this->assertGuest();
+    }
+
     public function test_profile_information_can_be_updated()
     {
         $user = User::factory()->create();
