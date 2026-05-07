@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\FileStatus;
+use App\Enums\ResourceVisibility;
 use App\Enums\UploadStatus;
 use App\Models\DriveFile;
 use App\Models\Folder;
@@ -19,7 +20,12 @@ class DashboardController extends Controller
     {
         $user = request()->user();
         $admin = $permissions->isAdmin($user);
-        $scope = fn ($query) => $admin ? $query : $query->where('owner_user_id', $user->id);
+        $visibleScope = fn ($query) => $admin
+            ? $query
+            : $query->where(fn ($nested) => $nested
+                ->where('owner_user_id', $user->id)
+                ->orWhere('visibility', ResourceVisibility::Workspace));
+        $ownedScope = fn ($query) => $admin ? $query : $query->where('owner_user_id', $user->id);
         $uploads->expireStaleUploads($admin ? null : $user);
         $activeUploadStatuses = [
             UploadStatus::Initiated->value,
@@ -28,20 +34,20 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard', [
             'stats' => [
-                'files' => $scope(DriveFile::query()->where('is_deleted', false)->where('status', FileStatus::Ready))->count(),
+                'files' => $visibleScope(DriveFile::query()->where('is_deleted', false)->where('status', FileStatus::Ready))->count(),
                 'shares' => ($admin ? ShareLink::query() : ShareLink::query()->where('created_by_user_id', $user->id))
                     ->where('is_revoked', false)
                     ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
                     ->count(),
-                'trash' => $scope(DriveFile::query()->where('is_deleted', true))->count()
-                    + $scope(Folder::query()->where('is_deleted', true))->count(),
+                'trash' => $ownedScope(DriveFile::query()->where('is_deleted', true))->count()
+                    + $ownedScope(Folder::query()->where('is_deleted', true))->count(),
                 'pending' => Upload::query()
                     ->where('initiated_by_user_id', $user->id)
                     ->whereIn('upload_status', $activeUploadStatuses)
                     ->where('expires_at', '>', now())
                     ->count(),
             ],
-            'recentFiles' => $scope(DriveFile::query()
+            'recentFiles' => $visibleScope(DriveFile::query()
                 ->with('currentVersion')
                 ->where('is_deleted', false)
                 ->where('status', FileStatus::Ready)
@@ -62,6 +68,7 @@ class DashboardController extends Controller
                     'file_id' => $upload->file_id,
                     'upload_status' => $upload->upload_status->value,
                     'display_name' => $upload->file?->display_name ?? 'Removed upload',
+                    'mime_type' => $upload->file?->mime_type,
                     'size_bytes' => $upload->size_bytes,
                     'created_at' => $upload->created_at,
                     'completed_at' => $upload->completed_at,

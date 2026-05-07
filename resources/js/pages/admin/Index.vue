@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
 import {
+    CalendarClock,
     CheckCircle2,
+    FileWarning,
+    HardDrive,
     KeyRound,
     RotateCcw,
     Save,
-    ShieldCheck,
+    Timer,
     UserPlus,
 } from 'lucide-vue-next';
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import InputError from '@/components/InputError.vue';
@@ -26,6 +29,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { formatBytes } from '@/lib/format';
 import type { UserRole } from '@/types';
 
 type UserRow = {
@@ -64,6 +68,9 @@ const settingsForm = useForm({
     share_expiry_days: props.settings.shareExpiryDays,
     blocked_extensions: props.settings.blockedExtensions.join(', '),
 });
+const uploadLimitLabel = computed(() =>
+    formatBytes(settingsForm.max_upload_size_bytes),
+);
 
 const createDialogOpen = ref(false);
 const generatedPassword = ref('');
@@ -205,79 +212,127 @@ function roleLabel(role: UserRole): string {
             </template>
         </PageHeader>
 
-        <section class="grid gap-6 xl:grid-cols-[1fr_.85fr]">
+        <section>
             <form
-                class="cloud-panel grid gap-4 p-5 md:grid-cols-4"
+                class="cloud-panel overflow-hidden"
                 @submit.prevent="saveSettings"
             >
-                <label class="text-sm font-medium">
-                    Upload limit
-                    <input
-                        v-model.number="settingsForm.max_upload_size_bytes"
-                        type="number"
-                        min="1"
-                        class="mt-2 w-full rounded-full border border-line bg-white px-4 py-2 dark:bg-white/10"
-                    />
-                    <InputError :message="settingsForm.errors.max_upload_size_bytes" />
-                </label>
-                <label class="text-sm font-medium">
-                    Retention days
-                    <input
-                        v-model.number="settingsForm.retention_days"
-                        type="number"
-                        min="1"
-                        max="365"
-                        class="mt-2 w-full rounded-full border border-line bg-white px-4 py-2 dark:bg-white/10"
-                    />
-                    <InputError :message="settingsForm.errors.retention_days" />
-                </label>
-                <label class="text-sm font-medium">
-                    Share expiry
-                    <input
-                        v-model.number="settingsForm.share_expiry_days"
-                        type="number"
-                        min="1"
-                        max="90"
-                        class="mt-2 w-full rounded-full border border-line bg-white px-4 py-2 dark:bg-white/10"
-                    />
-                    <InputError :message="settingsForm.errors.share_expiry_days" />
-                </label>
-                <label class="text-sm font-medium">
-                    Blocked extensions
-                    <input
-                        v-model="settingsForm.blocked_extensions"
-                        class="mt-2 w-full rounded-full border border-line bg-white px-4 py-2 dark:bg-white/10"
-                    />
-                    <InputError :message="settingsForm.errors.blocked_extensions" />
-                </label>
-                <Button
-                    type="submit"
-                    class="gap-2 md:col-span-4"
-                    :disabled="settingsForm.processing"
+                <div
+                    class="flex flex-col gap-3 border-b border-line p-5 sm:flex-row sm:items-start sm:justify-between"
                 >
-                    <Spinner v-if="settingsForm.processing" />
-                    <Save v-else class="h-4 w-4" />
-                    Save settings
-                </Button>
-            </form>
-
-            <aside class="cloud-panel p-5">
-                <div class="flex items-start gap-3">
-                    <span
-                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand"
-                    >
-                        <ShieldCheck class="h-5 w-5" />
-                    </span>
                     <div>
-                        <h2 class="font-semibold">Closed workspace signup</h2>
-                        <p class="mt-2 text-sm leading-6 text-ink-600 dark:text-ink-300">
-                            Public account creation is off. New users must be added
-                            here by an admin, then sign in with their temporary
-                            password or use password reset.
+                        <h2 class="text-lg font-semibold text-ink-950 dark:text-white">
+                            Workspace policy
+                        </h2>
+                        <p class="mt-1 text-sm text-ink-600 dark:text-ink-300">
+                            Upload limits, link expiry, trash retention, and blocked file types.
                         </p>
                     </div>
+                    <Badge variant="secondary" class="w-fit rounded-full">
+                        {{ uploadLimitLabel }}
+                    </Badge>
                 </div>
-            </aside>
+
+                <div class="grid gap-4 p-5 lg:grid-cols-2">
+                    <label
+                        class="rounded-2xl border border-line bg-white/70 p-4 text-sm font-medium dark:bg-white/10"
+                    >
+                        <span class="flex items-center gap-2">
+                            <HardDrive class="h-4 w-4 text-brand" />
+                            Upload limit
+                        </span>
+                        <input
+                            v-model.number="settingsForm.max_upload_size_bytes"
+                            type="number"
+                            min="1"
+                            class="mt-3 w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
+                        />
+                        <span class="mt-2 block text-xs text-ink-600 dark:text-ink-300">
+                            Current limit: {{ uploadLimitLabel }}
+                        </span>
+                        <InputError :message="settingsForm.errors.max_upload_size_bytes" />
+                    </label>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <label
+                            class="rounded-2xl border border-line bg-white/70 p-4 text-sm font-medium dark:bg-white/10"
+                        >
+                            <span class="flex items-center gap-2">
+                                <CalendarClock class="h-4 w-4 text-brand" />
+                                Retention
+                            </span>
+                            <div class="mt-3 flex items-center gap-2">
+                                <input
+                                    v-model.number="settingsForm.retention_days"
+                                    type="number"
+                                    min="1"
+                                    max="365"
+                                    class="min-w-0 flex-1 rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
+                                />
+                                <span class="text-sm text-ink-600 dark:text-ink-300">
+                                    days
+                                </span>
+                            </div>
+                            <InputError :message="settingsForm.errors.retention_days" />
+                        </label>
+
+                        <label
+                            class="rounded-2xl border border-line bg-white/70 p-4 text-sm font-medium dark:bg-white/10"
+                        >
+                            <span class="flex items-center gap-2">
+                                <Timer class="h-4 w-4 text-brand" />
+                                Share expiry
+                            </span>
+                            <div class="mt-3 flex items-center gap-2">
+                                <input
+                                    v-model.number="settingsForm.share_expiry_days"
+                                    type="number"
+                                    min="1"
+                                    max="90"
+                                    class="min-w-0 flex-1 rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
+                                />
+                                <span class="text-sm text-ink-600 dark:text-ink-300">
+                                    days
+                                </span>
+                            </div>
+                            <InputError :message="settingsForm.errors.share_expiry_days" />
+                        </label>
+                    </div>
+
+                    <label
+                        class="rounded-2xl border border-line bg-white/70 p-4 text-sm font-medium lg:col-span-2 dark:bg-white/10"
+                    >
+                        <span class="flex items-center gap-2">
+                            <FileWarning class="h-4 w-4 text-brand" />
+                            Blocked file extensions
+                        </span>
+                        <textarea
+                            v-model="settingsForm.blocked_extensions"
+                            rows="3"
+                            class="mt-3 w-full resize-none rounded-xl border border-line bg-white px-4 py-3 font-mono text-sm leading-6 dark:bg-white/10"
+                            placeholder="exe, bat, cmd, sh"
+                        />
+                        <span class="mt-2 block text-xs text-ink-600 dark:text-ink-300">
+                            Comma-separated extensions without dots.
+                        </span>
+                        <InputError :message="settingsForm.errors.blocked_extensions" />
+                    </label>
+                </div>
+
+                <div
+                    class="flex justify-end border-t border-line bg-ink-950/[0.02] px-5 py-4 dark:bg-white/[0.03]"
+                >
+                    <Button
+                        type="submit"
+                        class="gap-2"
+                        :disabled="settingsForm.processing"
+                    >
+                        <Spinner v-if="settingsForm.processing" />
+                        <Save v-else class="h-4 w-4" />
+                        Save policy
+                    </Button>
+                </div>
+            </form>
         </section>
 
         <section class="cloud-panel overflow-hidden">

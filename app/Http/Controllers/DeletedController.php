@@ -3,15 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\FileStatus;
-use App\Enums\ShareResourceType;
 use App\Models\DriveFile;
 use App\Models\Folder;
-use App\Models\ShareLink;
 use App\Services\AppSettingsService;
 use App\Services\AuditLogger;
 use App\Services\DrivePermissionService;
 use App\Services\DriveQueryService;
-use App\Services\ObjectStorageService;
+use App\Services\TrashRetentionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -86,28 +84,24 @@ class DeletedController extends Controller
         return back()->with('success', 'Folder restored.');
     }
 
-    public function hardDeleteFile(Request $request, string $file, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
+    public function hardDeleteFile(Request $request, string $file, TrashRetentionService $trash, AuditLogger $audit): RedirectResponse
     {
         abort_unless($request->user()->isAdmin(), 403);
-        $file = DriveFile::query()->where('is_deleted', true)->find($file);
+        $file = DriveFile::query()
+            ->with(['uploads', 'versions'])
+            ->where('is_deleted', true)
+            ->find($file);
         if (! $file) {
             return $this->missingTrashRedirect();
         }
 
-        foreach ($file->versions as $version) {
-            rescue(fn () => $storage->deleteObject($version->storage_key), report: false);
-        }
-        ShareLink::query()
-            ->where('resource_type', ShareResourceType::File->value)
-            ->where('resource_id', $file->id)
-            ->delete();
+        $trash->purgeFile($file);
         $audit->log('file.hard_deleted', 'file', $file->id, ['name' => $file->display_name], $request);
-        $file->delete();
 
         return back()->with('success', 'File permanently deleted.');
     }
 
-    public function hardDeleteFolder(Request $request, string $folder, DriveQueryService $drive, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
+    public function hardDeleteFolder(Request $request, string $folder, TrashRetentionService $trash, AuditLogger $audit): RedirectResponse
     {
         abort_unless($request->user()->isAdmin(), 403);
         $folder = Folder::query()->where('is_deleted', true)->find($folder);
@@ -115,22 +109,8 @@ class DeletedController extends Controller
             return $this->missingTrashRedirect();
         }
 
-        $folderIds = $drive->descendantFolderIds($folder->id);
-        $files = DriveFile::query()->with('versions')->whereIn('folder_id', $folderIds)->get();
-
-        foreach ($files as $file) {
-            foreach ($file->versions as $version) {
-                rescue(fn () => $storage->deleteObject($version->storage_key), report: false);
-            }
-        }
-
-        ShareLink::query()
-            ->where('resource_type', ShareResourceType::File->value)
-            ->whereIn('resource_id', $files->pluck('id'))
-            ->delete();
-        DriveFile::query()->whereIn('id', $files->pluck('id'))->delete();
-        Folder::query()->whereIn('id', $folderIds)->delete();
-        $audit->log('folder.hard_deleted', 'folder', $folder->id, ['folderIds' => $folderIds, 'fileCount' => $files->count()], $request);
+        $result = $trash->purgeFolder($folder);
+        $audit->log('folder.hard_deleted', 'folder', $folder->id, ['folderCount' => $result['folders'], 'fileCount' => $result['files']], $request);
 
         return back()->with('success', 'Folder permanently deleted.');
     }

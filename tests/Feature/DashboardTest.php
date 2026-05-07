@@ -31,6 +31,51 @@ class DashboardTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_member_dashboard_counts_owned_and_workspace_visible_files(): void
+    {
+        $member = User::factory()->create();
+        $other = User::factory()->create();
+
+        DriveFile::query()->create([
+            'owner_user_id' => $member->id,
+            'created_by_user_id' => $member->id,
+            'original_name' => 'owned.pdf',
+            'display_name' => 'owned.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 12,
+            'status' => FileStatus::Ready,
+            'visibility' => ResourceVisibility::Private,
+        ]);
+        DriveFile::query()->create([
+            'owner_user_id' => $other->id,
+            'created_by_user_id' => $other->id,
+            'original_name' => 'workspace.pdf',
+            'display_name' => 'workspace.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 12,
+            'status' => FileStatus::Ready,
+            'visibility' => ResourceVisibility::Workspace,
+        ]);
+        DriveFile::query()->create([
+            'owner_user_id' => $other->id,
+            'created_by_user_id' => $other->id,
+            'original_name' => 'private.pdf',
+            'display_name' => 'private.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 12,
+            'status' => FileStatus::Ready,
+            'visibility' => ResourceVisibility::Private,
+        ]);
+
+        $this->actingAs($member)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('stats.files', 2)
+                ->has('recentFiles', 2)
+            );
+    }
+
     public function test_dashboard_expires_stale_uploads_and_hides_them_from_pending_activity(): void
     {
         $user = User::factory()->create();

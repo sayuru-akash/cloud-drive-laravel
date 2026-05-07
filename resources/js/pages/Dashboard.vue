@@ -8,8 +8,10 @@ import {
     Trash2,
 } from 'lucide-vue-next';
 import { ref } from 'vue';
+import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
+import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
 
 defineProps<{
@@ -17,6 +19,7 @@ defineProps<{
     recentFiles: Array<{
         id: string;
         display_name: string;
+        mime_type: string | null;
         size_bytes: number;
         updated_at: string;
         visibility: string;
@@ -26,6 +29,7 @@ defineProps<{
         file_id: string;
         upload_status: string;
         display_name: string;
+        mime_type: string | null;
         size_bytes: number;
         created_at: string;
         completed_at: string | null;
@@ -156,7 +160,12 @@ async function cancelUpload(upload: {
                         :key="file.id"
                         class="flex items-center justify-between gap-4 py-4"
                     >
-                        <div class="min-w-0">
+                        <div class="flex min-w-0 items-center gap-3">
+                            <FileTypeIcon
+                                :name="file.display_name"
+                                :mime-type="file.mime_type"
+                            />
+                            <div class="min-w-0">
                             <p
                                 class="truncate text-sm font-medium text-ink-950 dark:text-white"
                             >
@@ -166,8 +175,10 @@ async function cancelUpload(upload: {
                                 class="mt-1 text-xs text-ink-600 dark:text-ink-300"
                             >
                                 {{ formatBytes(file.size_bytes) }} ·
+                                {{ formatFileType(file.display_name, file.mime_type) }} ·
                                 {{ formatDate(file.updated_at) }}
                             </p>
+                            </div>
                         </div>
                         <StatusBadge :value="file.visibility" />
                     </div>
@@ -205,7 +216,12 @@ async function cancelUpload(upload: {
                         class="min-w-0 rounded-[1.25rem] border border-line bg-white/70 p-4 dark:bg-white/10"
                     >
                         <div class="flex min-w-0 items-start justify-between gap-3">
-                            <div class="min-w-0">
+                            <div class="flex min-w-0 items-center gap-3">
+                                <FileTypeIcon
+                                    :name="upload.display_name"
+                                    :mime-type="upload.mime_type"
+                                />
+                                <div class="min-w-0">
                                 <p
                                     class="truncate text-sm font-medium text-ink-950 dark:text-white"
                                 >
@@ -216,11 +232,18 @@ async function cancelUpload(upload: {
                                 >
                                     {{ formatBytes(upload.size_bytes) }} ·
                                     {{
+                                        formatFileType(
+                                            upload.display_name,
+                                            upload.mime_type,
+                                        )
+                                    }} ·
+                                    {{
                                         upload.completed_at
                                             ? formatDate(upload.completed_at)
                                             : formatDate(upload.created_at)
                                     }}
                                 </p>
+                                </div>
                             </div>
                             <div class="flex shrink-0 flex-col items-end gap-2">
                                 <StatusBadge :value="upload.upload_status" />

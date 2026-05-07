@@ -8,18 +8,18 @@ use App\Models\Folder;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 
 class DriveQueryService
 {
     public function __construct(private readonly DrivePermissionService $permissions) {}
 
-    /** @return array{folders:LengthAwarePaginator<int, Folder>, files:LengthAwarePaginator<int, DriveFile>} */
+    /** @return array{folders:LengthAwarePaginator<int, array<string, mixed>>, files:LengthAwarePaginator<int, array<string, mixed>>} */
     public function browse(User $user, ?string $folderId, array $filters): array
     {
         $folderQuery = Folder::query()
             ->where('is_deleted', false)
-            ->where('parent_folder_id', $folderId)
-            ->orderBy('updated_at', 'desc');
+            ->where('parent_folder_id', $folderId);
 
         $fileQuery = DriveFile::query()
             ->with('currentVersion')
@@ -33,8 +33,9 @@ class DriveQueryService
         }
 
         if ($search = trim((string) ($filters['q'] ?? ''))) {
-            $folderQuery->where('name', 'like', "%{$search}%");
-            $fileQuery->where('display_name', 'like', "%{$search}%");
+            $needle = '%'.Str::of($search)->lower()->replace(['\\', '%', '_'], ['\\\\', '\%', '\_']).'%';
+            $folderQuery->whereRaw('lower(name) like ?', [$needle]);
+            $fileQuery->whereRaw('lower(display_name) like ?', [$needle]);
         }
 
         if (($filters['visibility'] ?? '') !== '') {
@@ -48,19 +49,37 @@ class DriveQueryService
 
         $sort = (string) ($filters['sort'] ?? 'updated-desc');
         $direction = str_ends_with($sort, 'asc') ? 'asc' : 'desc';
-        $column = match (true) {
+        $fileColumn = match (true) {
             str_starts_with($sort, 'name') => 'display_name',
             str_starts_with($sort, 'size') => 'size_bytes',
             default => 'updated_at',
         };
+        $folderColumn = str_starts_with($sort, 'name') ? 'name' : 'updated_at';
 
         return [
             'folders' => $folderQuery
+                ->orderBy($folderColumn, $direction)
                 ->paginate(50, ['*'], 'folders_page')
+                ->through(fn (Folder $folder): array => [
+                    'id' => $folder->id,
+                    'name' => $folder->name,
+                    'visibility' => $folder->visibility->value,
+                    'updated_at' => $folder->updated_at,
+                    'can_manage' => $this->permissions->canManage($user, $folder),
+                ])
                 ->withQueryString(),
             'files' => $fileQuery
-                ->orderBy($column, $direction)
+                ->orderBy($fileColumn, $direction)
                 ->paginate(50, ['*'], 'files_page')
+                ->through(fn (DriveFile $file): array => [
+                    'id' => $file->id,
+                    'display_name' => $file->display_name,
+                    'visibility' => $file->visibility->value,
+                    'size_bytes' => $file->size_bytes,
+                    'mime_type' => $file->mime_type,
+                    'updated_at' => $file->updated_at,
+                    'can_manage' => $this->permissions->canManage($user, $file),
+                ])
                 ->withQueryString(),
         ];
     }

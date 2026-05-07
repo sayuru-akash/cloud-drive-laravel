@@ -4,15 +4,21 @@
         @php
             $appName = config('app.name') === 'Laravel' ? 'Cloud Drive' : config('app.name', 'Cloud Drive');
             $requestPath = request()->path() === '/' ? '/' : '/'.trim(request()->path(), '/');
-            $isHome = $requestPath === '/';
+            $isShare = str_starts_with($requestPath, '/s/');
             $isPrivacy = $requestPath === '/privacy';
-            $isIndexable = $isHome || $isPrivacy;
-            $pageTitle = $isPrivacy ? 'Privacy | '.$appName : $appName;
-            $pageDescription = $isPrivacy
-                ? 'How Cloud Drive handles metadata, direct Backblaze B2 file transfers, signed download links, and audit logs.'
-                : 'Private team file management with direct Backblaze B2 uploads, download-only share links, retention, audit logs, and admin controls.';
-            $canonicalUrl = url($requestPath);
-            $robots = $isIndexable ? 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1' : 'noindex,nofollow,noarchive';
+            $pageTitle = match (true) {
+                $isShare => 'Secure file share | '.$appName,
+                $isPrivacy => 'Privacy | '.$appName,
+                default => $appName,
+            };
+            $pageDescription = match (true) {
+                $isShare => 'Secure download-only file sharing for authorized Cloud Drive recipients.',
+                $isPrivacy => 'How Cloud Drive handles metadata, direct Backblaze B2 file transfers, signed download links, and audit logs.',
+                default => 'Private team file management with direct Backblaze B2 uploads, download-only share links, retention, audit logs, and admin controls.',
+            };
+            $previewUrl = $isShare ? url('/') : url($requestPath);
+            $previewImage = url('/og-image.png');
+            $robots = 'noindex,nofollow,noarchive';
         @endphp
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,19 +26,21 @@
         <meta name="description" content="{{ $pageDescription }}">
         <meta name="robots" content="{{ $robots }}">
         <meta name="theme-color" content="#197a68">
-        @if ($isIndexable)
-            <link rel="canonical" href="{{ $canonicalUrl }}">
-        @endif
         <meta property="og:site_name" content="{{ $appName }}">
         <meta property="og:title" content="{{ $pageTitle }}">
         <meta property="og:description" content="{{ $pageDescription }}">
         <meta property="og:type" content="website">
-        <meta property="og:url" content="{{ $canonicalUrl }}">
-        <meta property="og:image" content="{{ url('/apple-touch-icon.png') }}">
+        <meta property="og:url" content="{{ $previewUrl }}">
+        <meta property="og:image" content="{{ $previewImage }}">
+        <meta property="og:image:secure_url" content="{{ $previewImage }}">
+        <meta property="og:image:width" content="1200">
+        <meta property="og:image:height" content="630">
+        <meta property="og:image:alt" content="{{ $appName }} secure file workspace">
         <meta name="twitter:card" content="summary_large_image">
         <meta name="twitter:title" content="{{ $pageTitle }}">
         <meta name="twitter:description" content="{{ $pageDescription }}">
-        <meta name="twitter:image" content="{{ url('/apple-touch-icon.png') }}">
+        <meta name="twitter:image" content="{{ $previewImage }}">
+        <meta name="twitter:image:alt" content="{{ $appName }} secure file workspace">
 
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>

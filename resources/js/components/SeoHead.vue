@@ -9,14 +9,12 @@ const props = withDefaults(
         path?: string;
         image?: string;
         type?: 'website' | 'article';
-        noindex?: boolean;
     }>(),
     {
         description:
             'A private workspace file manager with direct Backblaze B2 uploads, download-only sharing, retention, audit logs, and admin controls.',
-        image: '/apple-touch-icon.png',
+        image: '/og-image.png',
         type: 'website',
-        noindex: false,
     },
 );
 
@@ -40,11 +38,7 @@ const fullTitle = computed(() =>
         ? props.title
         : `${props.title} | ${appName.value}`,
 );
-const robots = computed(() =>
-    props.noindex
-        ? 'noindex,nofollow,noarchive'
-        : 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1',
-);
+const robots = 'noindex,nofollow,noarchive';
 </script>
 
 <template>
@@ -55,12 +49,6 @@ const robots = computed(() =>
             :content="props.description"
         />
         <meta head-key="robots" name="robots" :content="robots" />
-        <link
-            v-if="!props.noindex"
-            head-key="canonical"
-            rel="canonical"
-            :href="canonical"
-        />
 
         <meta
             head-key="og:site_name"
@@ -76,6 +64,18 @@ const robots = computed(() =>
         <meta head-key="og:type" property="og:type" :content="props.type" />
         <meta head-key="og:url" property="og:url" :content="canonical" />
         <meta head-key="og:image" property="og:image" :content="imageUrl" />
+        <meta
+            head-key="og:image:secure_url"
+            property="og:image:secure_url"
+            :content="imageUrl"
+        />
+        <meta head-key="og:image:width" property="og:image:width" content="1200" />
+        <meta head-key="og:image:height" property="og:image:height" content="630" />
+        <meta
+            head-key="og:image:alt"
+            property="og:image:alt"
+            :content="`${appName} secure file workspace`"
+        />
 
         <meta
             head-key="twitter:card"
@@ -96,6 +96,11 @@ const robots = computed(() =>
             head-key="twitter:image"
             name="twitter:image"
             :content="imageUrl"
+        />
+        <meta
+            head-key="twitter:image:alt"
+            name="twitter:image:alt"
+            :content="`${appName} secure file workspace`"
         />
     </Head>
 </template>

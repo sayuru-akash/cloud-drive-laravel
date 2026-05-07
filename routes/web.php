@@ -15,24 +15,9 @@ use App\Http\Controllers\ShareLinkController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/robots.txt', function () {
-    $sitemap = url('/sitemap.xml');
     $content = implode("\n", [
         'User-agent: *',
-        'Allow: /',
-        'Allow: /privacy',
-        'Disallow: /admin',
-        'Disallow: /api',
-        'Disallow: /audit',
-        'Disallow: /dashboard',
-        'Disallow: /deleted',
-        'Disallow: /files',
-        'Disallow: /login',
-        'Disallow: /register',
-        'Disallow: /reset-password',
-        'Disallow: /settings',
-        'Disallow: /shared',
-        'Disallow: /s/',
-        "Sitemap: {$sitemap}",
+        'Disallow: /',
         '',
     ]);
 
@@ -43,8 +28,6 @@ Route::get('/sitemap.xml', function () {
     return response()
         ->view('sitemap', [
             'urls' => [
-                ['loc' => url('/'), 'priority' => '1.0'],
-                ['loc' => url('/privacy'), 'priority' => '0.5'],
             ],
         ])
         ->header('Content-Type', 'application/xml; charset=UTF-8');

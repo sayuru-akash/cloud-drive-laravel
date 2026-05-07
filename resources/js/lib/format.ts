@@ -24,3 +24,15 @@ export function formatDate(value: string | null | undefined): string {
         timeStyle: 'short',
     }).format(new Date(value));
 }
+
+export function formatStatus(value: string | null | undefined): string {
+    if (! value) {
+        return 'Unknown';
+    }
+
+    return value
+        .split(/[._-]/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}

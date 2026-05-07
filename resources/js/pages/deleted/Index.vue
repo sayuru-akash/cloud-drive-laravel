@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { File, Folder, Trash2 } from 'lucide-vue-next';
+import { Folder, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import {
@@ -12,9 +13,15 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { formatFileType } from '@/lib/file-types';
 import { formatDate } from '@/lib/format';
 
-type DeletedFile = { id: string; display_name: string; deleted_at: string };
+type DeletedFile = {
+    id: string;
+    display_name: string;
+    mime_type: string | null;
+    deleted_at: string;
+};
 type DeletedFolder = { id: string; name: string; deleted_at: string };
 type DeleteTarget =
     | { kind: 'file'; item: DeletedFile }
@@ -162,10 +169,14 @@ function confirmHardDelete() {
                 class="flex items-center justify-between gap-4 py-4"
             >
                 <div class="flex items-center gap-3">
-                    <File class="h-5 w-5 text-brand" />
+                    <FileTypeIcon
+                        :name="file.display_name"
+                        :mime-type="file.mime_type"
+                    />
                     <div>
                         <p class="font-medium">{{ file.display_name }}</p>
                         <p class="text-xs text-ink-600 dark:text-ink-300">
+                            {{ formatFileType(file.display_name, file.mime_type) }} ·
                             Deleted {{ formatDate(file.deleted_at) }}
                         </p>
                     </div>

@@ -3,7 +3,9 @@ import { Download } from 'lucide-vue-next';
 import { computed } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import SeoHead from '@/components/SeoHead.vue';
+import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
 
 const props = defineProps<{
@@ -32,7 +34,7 @@ const unavailableMessage = computed(() => {
     <SeoHead
         title="Shared file"
         description="Secure download-only Cloud Drive share link."
-        noindex
+        path="/"
     />
     <main class="flex min-h-screen flex-col bg-background px-4 py-8">
         <div class="grid flex-1 place-items-center">
@@ -43,11 +45,23 @@ const unavailableMessage = computed(() => {
                     <AppLogoIcon class="h-11 w-11" />
                 </div>
                 <template v-if="available && file">
+                    <FileTypeIcon
+                        :name="file.display_name"
+                        :mime-type="file.mime_type ?? null"
+                        class="mx-auto mt-6 h-12 w-12 rounded-2xl"
+                    />
                     <h1 class="mt-6 text-3xl font-semibold tracking-tight">
                         {{ file.display_name }}
                     </h1>
                     <p class="mt-3 text-sm text-ink-600 dark:text-ink-300">
-                        {{ formatBytes(file.size_bytes) }} · expires
+                        {{ formatBytes(file.size_bytes) }} ·
+                        {{
+                            formatFileType(
+                                file.display_name,
+                                file.mime_type ?? null,
+                            )
+                        }}
+                        · expires
                         {{ formatDate(expiresAt) }}
                     </p>
                     <a

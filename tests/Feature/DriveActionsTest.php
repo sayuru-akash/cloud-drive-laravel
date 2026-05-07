@@ -41,6 +41,96 @@ it('blocks moving a file into a folder the user cannot manage', function (): voi
     expect($file->fresh()->folder_id)->toBeNull();
 });
 
+it('marks workspace-visible resources as view only for non owners on the files page', function (): void {
+    $member = User::factory()->create();
+    $other = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Team folder',
+        'owner_user_id' => $other->id,
+        'created_by_user_id' => $other->id,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $other->id,
+        'created_by_user_id' => $other->id,
+        'original_name' => 'team.pdf',
+        'display_name' => 'team.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+
+    $this->actingAs($member)
+        ->get('/files')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('canManageCurrentLocation', true)
+            ->where('folders.data.0.id', $folder->id)
+            ->where('folders.data.0.can_manage', false)
+            ->where('files.data.0.id', $file->id)
+            ->where('files.data.0.can_manage', false)
+        );
+
+    $this->actingAs($member)
+        ->get("/files?folder={$folder->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('canManageCurrentLocation', false)
+        );
+});
+
+it('filters the files page from database queries with validated URL state', function (): void {
+    $member = User::factory()->create();
+    $other = User::factory()->create();
+    $matchingFolder = Folder::query()->create([
+        'name' => 'Reports',
+        'owner_user_id' => $member->id,
+        'created_by_user_id' => $member->id,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+    Folder::query()->create([
+        'name' => 'Invoices',
+        'owner_user_id' => $member->id,
+        'created_by_user_id' => $member->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $matchingFile = DriveFile::query()->create([
+        'owner_user_id' => $other->id,
+        'created_by_user_id' => $other->id,
+        'original_name' => 'Q1 Report.pdf',
+        'display_name' => 'Q1 Report.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+    DriveFile::query()->create([
+        'owner_user_id' => $member->id,
+        'created_by_user_id' => $member->id,
+        'original_name' => 'report-notes.txt',
+        'display_name' => 'report-notes.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 256,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+
+    $this->actingAs($member)
+        ->get('/files?q=report&type=application/pdf&visibility=workspace&sort=name-asc')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('filters.q', 'report')
+            ->where('filters.type', 'application/pdf')
+            ->where('filters.visibility', 'workspace')
+            ->where('filters.sort', 'name-asc')
+            ->where('folders.data.0.id', $matchingFolder->id)
+            ->where('files.data.0.id', $matchingFile->id)
+            ->where('files.data.0.display_name', 'Q1 Report.pdf')
+            ->has('files.data', 1)
+        );
+});
+
 it('redirects stale file actions back to files instead of showing a 404', function (): void {
     $owner = User::factory()->create();
 
@@ -432,6 +522,15 @@ it('hard deletes a folder subtree with file versions and share links', function 
         'mime_type' => 'text/plain',
         'uploaded_by_user_id' => $admin->id,
     ]);
+    Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $admin->id,
+        'upload_status' => UploadStatus::Cancelled,
+        'storage_key' => 'objects/purge-upload.txt',
+        'content_type' => 'text/plain',
+        'size_bytes' => 12,
+        'expires_at' => now()->subDay(),
+    ]);
     ShareLink::query()->create([
         'resource_type' => ShareResourceType::File,
         'resource_id' => $file->id,
@@ -441,10 +540,18 @@ it('hard deletes a folder subtree with file versions and share links', function 
         'expires_at' => now()->addDay(),
     ]);
 
-    $this->mock(ObjectStorageService::class)
-        ->shouldReceive('deleteObject')
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
         ->once()
-        ->with('objects/purge.txt');
+        ->andReturnTrue();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/purge.txt')
+        ->andReturnNull();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/purge-upload.txt')
+        ->andReturnNull();
 
     $this->actingAs($admin)
         ->delete("/deleted/folders/{$folder->id}/hard-delete")
@@ -453,5 +560,185 @@ it('hard deletes a folder subtree with file versions and share links', function 
     expect(Folder::query()->find($folder->id))->toBeNull()
         ->and(DriveFile::query()->find($file->id))->toBeNull()
         ->and(FileVersion::query()->where('file_id', $file->id)->exists())->toBeFalse()
+        ->and(Upload::query()->where('file_id', $file->id)->exists())->toBeFalse()
         ->and(ShareLink::query()->where('resource_id', $file->id)->exists())->toBeFalse();
+});
+
+it('hard deletes a single trashed file from storage before removing metadata', function (): void {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $admin->id,
+        'created_by_user_id' => $admin->id,
+        'original_name' => 'purge.pdf',
+        'display_name' => 'purge.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Deleted,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now(),
+    ]);
+    FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/purge.pdf',
+        'size_bytes' => 512,
+        'mime_type' => 'application/pdf',
+        'uploaded_by_user_id' => $admin->id,
+    ]);
+    Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $admin->id,
+        'upload_status' => UploadStatus::Cancelled,
+        'storage_key' => 'objects/purge-upload.pdf',
+        'content_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'expires_at' => now()->subDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
+        ->once()
+        ->andReturnTrue();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/purge.pdf')
+        ->andReturnNull();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/purge-upload.pdf')
+        ->andReturnNull();
+
+    $this->actingAs($admin)
+        ->delete("/deleted/files/{$file->id}/hard-delete")
+        ->assertRedirect();
+
+    expect(DriveFile::query()->find($file->id))->toBeNull()
+        ->and(FileVersion::query()->where('file_id', $file->id)->exists())->toBeFalse()
+        ->and(Upload::query()->where('file_id', $file->id)->exists())->toBeFalse();
+});
+
+it('prunes expired trash through the retention command and keeps newer trash restorable', function (): void {
+    $owner = User::factory()->create();
+    $expiredFolder = Folder::query()->create([
+        'name' => 'Expired folder',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now()->subDays(31),
+    ]);
+    $expiredFile = DriveFile::query()->create([
+        'folder_id' => $expiredFolder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'expired.pdf',
+        'display_name' => 'expired.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Deleted,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now()->subDays(31),
+    ]);
+    $newerFile = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'newer.pdf',
+        'display_name' => 'newer.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Deleted,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now()->subDays(5),
+    ]);
+    FileVersion::query()->create([
+        'file_id' => $expiredFile->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/expired.pdf',
+        'size_bytes' => 512,
+        'mime_type' => 'application/pdf',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    Upload::query()->create([
+        'file_id' => $expiredFile->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Cancelled,
+        'storage_key' => 'objects/expired-upload.pdf',
+        'content_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'expires_at' => now()->subDay(),
+    ]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::File,
+        'resource_id' => $expiredFile->id,
+        'token_hash' => hash('sha256', 'expired-share'),
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
+        ->once()
+        ->andReturnTrue();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/expired.pdf')
+        ->andReturnNull();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/expired-upload.pdf')
+        ->andReturnNull();
+
+    $this->artisan('drive:prune-trash')
+        ->assertSuccessful();
+
+    expect(Folder::query()->find($expiredFolder->id))->toBeNull()
+        ->and(DriveFile::query()->find($expiredFile->id))->toBeNull()
+        ->and(ShareLink::query()->where('resource_id', $expiredFile->id)->exists())->toBeFalse()
+        ->and(DriveFile::query()->find($newerFile->id))->not->toBeNull();
+});
+
+it('does not remove expired trash metadata if storage deletion fails', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'keep.pdf',
+        'display_name' => 'keep.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Deleted,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now()->subDays(31),
+    ]);
+    FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/keep.pdf',
+        'size_bytes' => 512,
+        'mime_type' => 'application/pdf',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
+        ->once()
+        ->andReturnTrue();
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/keep.pdf')
+        ->andThrow(new RuntimeException('Storage refused deletion.'));
+
+    $this->artisan('drive:prune-trash')
+        ->assertFailed();
+
+    expect(DriveFile::query()->find($file->id))->not->toBeNull()
+        ->and(FileVersion::query()->where('file_id', $file->id)->exists())->toBeTrue();
 });

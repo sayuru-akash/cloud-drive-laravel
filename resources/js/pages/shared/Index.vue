@@ -5,11 +5,11 @@ import {
     Check,
     Copy,
     ExternalLink,
-    Link2,
     LoaderCircle,
     Trash2,
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
@@ -22,6 +22,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { formatFileType } from '@/lib/file-types';
 import { formatDate } from '@/lib/format';
 
 type ShareItem = {
@@ -210,7 +211,10 @@ function confirmRevoke() {
             >
                 <div class="min-w-0">
                     <div class="flex min-w-0 items-center gap-3">
-                        <Link2 class="h-5 w-5 shrink-0 text-brand" />
+                        <FileTypeIcon
+                            :name="share.file?.display_name ?? share.resource_id"
+                            :mime-type="share.file?.mime_type ?? null"
+                        />
                         <p
                             class="truncate font-medium text-ink-950 dark:text-white"
                         >
@@ -220,7 +224,13 @@ function confirmRevoke() {
                     <p
                         class="mt-1 text-xs text-ink-600 dark:text-ink-300"
                     >
-                        Created {{ formatDate(share.created_at) }} · Expires
+                        {{
+                            formatFileType(
+                                share.file?.display_name ?? share.resource_id,
+                                share.file?.mime_type ?? null,
+                            )
+                        }}
+                        · Created {{ formatDate(share.created_at) }} · Expires
                         {{ formatDate(share.expires_at) }}
                     </p>
                     <p

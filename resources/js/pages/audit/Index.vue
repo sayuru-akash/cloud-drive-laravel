@@ -2,7 +2,7 @@
 import { Head, router } from '@inertiajs/vue3';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatStatus } from '@/lib/format';
 
 defineProps<{
     logs: {
@@ -63,10 +63,12 @@ defineProps<{
                     class="grid gap-3 py-4 md:grid-cols-[1fr_auto] md:items-center"
                 >
                     <div>
-                        <p class="font-medium">{{ log.action_type }}</p>
+                        <p class="font-medium">
+                            {{ formatStatus(log.action_type) }}
+                        </p>
                         <p class="text-sm text-ink-600 dark:text-ink-300">
                             {{ log.actor_email ?? 'Public' }} ·
-                            {{ log.resource_type ?? 'system' }} ·
+                            {{ formatStatus(log.resource_type ?? 'system') }} ·
                             {{ log.resource_id ?? '-' }}
                         </p>
                     </div>

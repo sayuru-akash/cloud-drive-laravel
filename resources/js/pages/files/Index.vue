@@ -2,22 +2,24 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
+    ChevronDown,
     Check,
     Copy,
     Download,
-    File,
+    FileUp,
     Folder,
     Grid2X2,
     List,
+    MoreHorizontal,
     Pencil,
     Plus,
     Search,
     Share2,
     Trash2,
-    UploadCloud,
     Users,
 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
@@ -29,7 +31,14 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
 
 type FolderItem = {
@@ -37,6 +46,7 @@ type FolderItem = {
     name: string;
     visibility: string;
     updated_at: string;
+    can_manage: boolean;
 };
 type FileItem = {
     id: string;
@@ -45,6 +55,7 @@ type FileItem = {
     size_bytes: number;
     mime_type: string;
     updated_at: string;
+    can_manage: boolean;
 };
 type RenameTarget =
     | { kind: 'file'; item: FileItem }
@@ -69,6 +80,7 @@ type UploadQueueItem = {
         | 'finalizing'
         | 'done'
         | 'error';
+    mimeType: string | null;
     message: string;
 };
 type Paginated<T> = {
@@ -78,6 +90,7 @@ type Paginated<T> = {
     to: number | null;
     total: number;
 };
+type FilterKey = 'q' | 'visibility' | 'type' | 'sort';
 
 const props = defineProps<{
     folderId: string | null;
@@ -92,11 +105,14 @@ const props = defineProps<{
         parallelPartUploads?: number;
         shareExpiryDays?: number;
     };
+    canManageCurrentLocation: boolean;
 }>();
 
 const view = ref(localStorage.getItem('cloud-drive-view') || 'list');
 const uploadQueue = ref<UploadQueueItem[]>([]);
 const dragging = ref(false);
+const createFolderOpen = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
 const shareCopyState = ref<'idle' | 'copied' | 'failed'>('idle');
 const renameTarget = ref<RenameTarget | null>(null);
 const renameValue = ref('');
@@ -105,7 +121,23 @@ const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
 const accessValue = ref('private');
 const accessProcessing = ref(false);
-const driveRefreshProps = ['files', 'folders', 'breadcrumbs', 'flash'];
+const driveRefreshProps = [
+    'files',
+    'folders',
+    'breadcrumbs',
+    'filters',
+    'flash',
+    'canManageCurrentLocation',
+];
+let revalidateTimer: number | null = null;
+let filterTimer: number | null = null;
+let lastRevalidatedAt = 0;
+const filterValues = ref({
+    q: props.filters.q ?? '',
+    visibility: props.filters.visibility ?? '',
+    type: props.filters.type ?? '',
+    sort: props.filters.sort ?? 'updated-desc',
+});
 const folderForm = useForm({
     name: '',
     parent_folder_id: props.folderId,
@@ -121,9 +153,14 @@ const page = usePage<{
 
 const activeFilters = computed(
     () =>
-        [props.filters.q, props.filters.visibility, props.filters.type].filter(
-            Boolean,
-        ).length,
+        [
+            props.filters.q,
+            props.filters.visibility,
+            props.filters.type,
+            props.filters.sort && props.filters.sort !== 'updated-desc'
+                ? props.filters.sort
+                : '',
+        ].filter(Boolean).length,
 );
 const folderItems = computed(() => props.folders.data);
 const fileItems = computed(() => props.files.data);
@@ -169,24 +206,107 @@ function setView(next: string) {
     localStorage.setItem('cloud-drive-view', next);
 }
 
-function updateFilters(key: string, value: string) {
+function filterPayload() {
+    return {
+        q: filterValues.value.q || undefined,
+        visibility: filterValues.value.visibility || undefined,
+        type: filterValues.value.type || undefined,
+        sort:
+            filterValues.value.sort && filterValues.value.sort !== 'updated-desc'
+                ? filterValues.value.sort
+                : undefined,
+        folder: props.folderId || undefined,
+    };
+}
+
+function visitWithFilters() {
     router.get(
         '/files',
+        filterPayload(),
         {
-            ...props.filters,
-            [key]: value || undefined,
-            folder: props.folderId || undefined,
+            only: driveRefreshProps,
+            preserveScroll: true,
+            preserveState: true,
+            replace: true,
         },
-        { preserveState: true, replace: true },
     );
 }
 
+function queueFilterVisit() {
+    if (filterTimer !== null) {
+        window.clearTimeout(filterTimer);
+    }
+
+    filterTimer = window.setTimeout(visitWithFilters, 300);
+}
+
+function updateFilter(key: FilterKey, value: string) {
+    filterValues.value[key] = value;
+
+    if (key === 'q') {
+        queueFilterVisit();
+
+        return;
+    }
+
+    visitWithFilters();
+}
+
+function clearFilters() {
+    filterValues.value = {
+        q: '',
+        visibility: '',
+        type: '',
+        sort: 'updated-desc',
+    };
+
+    router.get(
+        '/files',
+        { folder: props.folderId || undefined },
+        {
+            only: driveRefreshProps,
+            preserveScroll: true,
+            preserveState: true,
+            replace: true,
+        },
+    );
+}
+
+function openFilePicker() {
+    if (! props.canManageCurrentLocation) {
+        return;
+    }
+
+    fileInput.value?.click();
+}
+
+function openCreateFolderDialog() {
+    if (! props.canManageCurrentLocation) {
+        return;
+    }
+
+    folderForm.parent_folder_id = props.folderId;
+    folderForm.visibility = 'private';
+    folderForm.clearErrors();
+    createFolderOpen.value = true;
+}
+
+function closeCreateFolderDialog() {
+    createFolderOpen.value = false;
+    folderForm.reset('name');
+    folderForm.clearErrors();
+}
+
 function createFolder() {
+    if (! props.canManageCurrentLocation) {
+        return;
+    }
+
     folderForm.parent_folder_id = props.folderId;
     folderForm.post('/folders', {
         only: driveRefreshProps,
         preserveScroll: true,
-        onSuccess: () => folderForm.reset('name'),
+        onSuccess: closeCreateFolderDialog,
     });
 }
 
@@ -580,12 +700,17 @@ async function uploadOne(file: globalThis.File, queueId: string) {
 }
 
 async function uploadFiles(list: FileList) {
+    if (! props.canManageCurrentLocation) {
+        return;
+    }
+
     const files = Array.from(list);
     const queued = files.map((file) => {
         const item: UploadQueueItem = {
             id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
             name: file.name,
             size: file.size,
+            mimeType: file.type || null,
             uploadedBytes: 0,
             progress: 0,
             status: 'queued',
@@ -620,7 +745,7 @@ async function uploadFiles(list: FileList) {
 function handleDrop(event: DragEvent) {
     dragging.value = false;
 
-    if (event.dataTransfer?.files) {
+    if (props.canManageCurrentLocation && event.dataTransfer?.files) {
         void uploadFiles(event.dataTransfer.files);
     }
 }
@@ -633,13 +758,65 @@ function handleInput(event: Event) {
         input.value = '';
     }
 }
+
+function revalidateDrive(force = false) {
+    const now = Date.now();
+
+    if (! force && now - lastRevalidatedAt < 15_000) {
+        return;
+    }
+
+    lastRevalidatedAt = now;
+    router.reload({ only: driveRefreshProps });
+}
+
+function revalidateWhenVisible() {
+    if (document.visibilityState === 'visible') {
+        revalidateDrive();
+    }
+}
+
+function revalidateOnFocus() {
+    revalidateDrive();
+}
+
+onMounted(() => {
+    revalidateTimer = window.setTimeout(() => revalidateDrive(true), 350);
+    window.addEventListener('focus', revalidateOnFocus);
+    document.addEventListener('visibilitychange', revalidateWhenVisible);
+});
+
+onBeforeUnmount(() => {
+    if (revalidateTimer !== null) {
+        window.clearTimeout(revalidateTimer);
+    }
+
+    if (filterTimer !== null) {
+        window.clearTimeout(filterTimer);
+    }
+
+    window.removeEventListener('focus', revalidateOnFocus);
+    document.removeEventListener('visibilitychange', revalidateWhenVisible);
+});
+
+watch(
+    () => props.filters,
+    (filters) => {
+        filterValues.value = {
+            q: filters.q ?? '',
+            visibility: filters.visibility ?? '',
+            type: filters.type ?? '',
+            sort: filters.sort ?? 'updated-desc',
+        };
+    },
+);
 </script>
 
 <template>
     <Head title="Files" />
     <main
         class="space-y-6"
-        @dragover.prevent="dragging = true"
+        @dragover.prevent="canManageCurrentLocation && (dragging = true)"
         @dragleave="dragging = false"
         @drop.prevent="handleDrop"
     >
@@ -648,20 +825,37 @@ function handleInput(event: Event) {
             description="Browse folders, upload directly to storage, share download links, and keep access tidy."
         >
             <template #actions>
-                <label
-                    class="cloud-button cursor-pointer bg-ink-950 text-white dark:bg-white dark:text-ink-950"
-                >
-                    <UploadCloud class="h-4 w-4" />
-                    Upload
-                    <input
-                        type="file"
-                        multiple
-                        class="hidden"
-                        @change="handleInput"
-                    />
-                </label>
+                <DropdownMenu v-if="canManageCurrentLocation">
+                    <DropdownMenuTrigger as-child>
+                        <button
+                            type="button"
+                            class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                        >
+                            <Plus class="h-4 w-4" />
+                            New
+                            <ChevronDown class="h-4 w-4 opacity-70" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-48">
+                        <DropdownMenuItem @select="openFilePicker">
+                            <FileUp class="h-4 w-4" />
+                            Select files
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="openCreateFolderDialog">
+                            <Folder class="h-4 w-4" />
+                            Create folder
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </template>
         </PageHeader>
+        <input
+            ref="fileInput"
+            type="file"
+            multiple
+            class="hidden"
+            @change="handleInput"
+        />
 
         <section class="cloud-panel p-4 md:p-5">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -670,11 +864,11 @@ function handleInput(event: Event) {
                 >
                     <Search class="h-4 w-4 text-brand" />
                     <input
-                        :value="filters.q"
+                        :value="filterValues.q"
                         class="min-w-0 flex-1 bg-transparent text-sm outline-none"
                         placeholder="Search files"
                         @input="
-                            updateFilters(
+                            updateFilter(
                                 'q',
                                 ($event.target as HTMLInputElement).value,
                             )
@@ -683,9 +877,9 @@ function handleInput(event: Event) {
                 </div>
                 <select
                     class="rounded-full border border-line bg-white px-4 py-2 text-sm dark:bg-white/10"
-                    :value="filters.visibility"
+                    :value="filterValues.visibility"
                     @change="
-                        updateFilters(
+                        updateFilter(
                             'visibility',
                             ($event.target as HTMLSelectElement).value,
                         )
@@ -695,13 +889,44 @@ function handleInput(event: Event) {
                     <option value="private">Private</option>
                     <option value="workspace">Workspace</option>
                 </select>
+                <select
+                    class="rounded-full border border-line bg-white px-4 py-2 text-sm dark:bg-white/10"
+                    :value="filterValues.type"
+                    @change="
+                        updateFilter(
+                            'type',
+                            ($event.target as HTMLSelectElement).value,
+                        )
+                    "
+                >
+                    <option value="">All types</option>
+                    <option value="image/">Images</option>
+                    <option value="application/pdf">PDFs</option>
+                    <option value="video/">Videos</option>
+                    <option value="text/">Text</option>
+                </select>
+                <select
+                    class="rounded-full border border-line bg-white px-4 py-2 text-sm dark:bg-white/10"
+                    :value="filterValues.sort"
+                    @change="
+                        updateFilter(
+                            'sort',
+                            ($event.target as HTMLSelectElement).value,
+                        )
+                    "
+                >
+                    <option value="updated-desc">Newest</option>
+                    <option value="updated-asc">Oldest</option>
+                    <option value="name-asc">Name A-Z</option>
+                    <option value="name-desc">Name Z-A</option>
+                    <option value="size-desc">Largest files</option>
+                    <option value="size-asc">Smallest files</option>
+                </select>
                 <button
                     v-if="activeFilters"
                     type="button"
                     class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
-                    @click="
-                        router.get('/files', { folder: folderId || undefined })
-                    "
+                    @click="clearFilters"
                 >
                     Clear
                 </button>
@@ -831,96 +1056,80 @@ function handleInput(event: Event) {
                     : ''
             "
         >
-            <form
-                class="mb-5 flex flex-col gap-3 md:flex-row"
-                @submit.prevent="createFolder"
-            >
-                <input
-                    v-model="folderForm.name"
-                    class="rounded-full border border-line bg-white px-4 py-2 text-sm outline-none dark:bg-white/10"
-                    placeholder="New folder"
-                />
-                <select
-                    v-model="folderForm.visibility"
-                    class="rounded-full border border-line bg-white px-4 py-2 text-sm dark:bg-white/10"
-                >
-                    <option value="private">Private</option>
-                    <option value="workspace">Workspace</option>
-                </select>
-                <button
-                    type="submit"
-                    class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
-                    :disabled="folderForm.processing"
-                >
-                    <Plus class="h-4 w-4" />
-                    Create
-                </button>
-            </form>
-
             <div
                 v-if="view === 'grid'"
-                class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                class="grid auto-rows-fr gap-4 sm:grid-cols-2 xl:grid-cols-3"
             >
                 <div
                     v-for="folder in folderItems"
                     :key="folder.id"
-                    class="rounded-[1.5rem] border border-line bg-white/70 p-4 dark:bg-white/10"
+                    class="flex min-h-48 flex-col rounded-2xl border border-line bg-white/70 p-4 dark:bg-white/10"
                 >
-                    <Folder class="h-6 w-6 text-brand" />
+                    <div class="flex items-start justify-between gap-3">
+                        <span
+                            class="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand/10 text-brand"
+                        >
+                            <Folder class="h-5 w-5" />
+                        </span>
+                        <DropdownMenu v-if="folder.can_manage">
+                            <DropdownMenuTrigger as-child>
+                                <button
+                                    type="button"
+                                    class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
+                                    aria-label="Folder actions"
+                                >
+                                    <MoreHorizontal class="h-4 w-4" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" class="w-44">
+                                <DropdownMenuItem @select="renameFolder(folder)">
+                                    <Pencil class="h-4 w-4" />
+                                    Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    @select="
+                                        manageAccess({
+                                            kind: 'folder',
+                                            item: folder,
+                                        })
+                                    "
+                                >
+                                    <Users class="h-4 w-4" />
+                                    Access
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    variant="destructive"
+                                    @select="trashFolder(folder)"
+                                >
+                                    <Trash2 class="h-4 w-4" />
+                                    Move to trash
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
                     <Link
                         :href="`/files?folder=${folder.id}`"
-                        class="mt-5 block truncate font-semibold text-ink-950 dark:text-white"
+                        class="mt-5 block min-w-0 truncate font-semibold text-ink-950 dark:text-white"
                         >{{ folder.name }}</Link
                     >
-                    <div class="mt-3 flex items-center justify-between gap-3">
+                    <div class="mt-auto flex items-center justify-between gap-3 pt-5">
                         <StatusBadge :value="folder.visibility" />
-                        <div class="flex items-center gap-2">
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
-                                title="Rename"
-                                @click="renameFolder(folder)"
-                            >
-                                <Pencil class="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
-                                title="Manage access"
-                                @click="
-                                    manageAccess({ kind: 'folder', item: folder })
-                                "
-                            >
-                                <Users class="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
-                                title="Move to trash"
-                                @click="trashFolder(folder)"
-                            >
-                                <Trash2 class="h-4 w-4" />
-                            </button>
-                        </div>
+                        <span class="text-xs text-ink-500 dark:text-ink-400">
+                            {{ formatDate(folder.updated_at) }}
+                        </span>
                     </div>
                 </div>
                 <div
                     v-for="file in fileItems"
                     :key="file.id"
-                    class="rounded-[1.5rem] border border-line bg-white/70 p-4 dark:bg-white/10"
+                    class="flex min-h-56 flex-col rounded-2xl border border-line bg-white/70 p-4 dark:bg-white/10"
                 >
-                    <File class="h-6 w-6 text-brand" />
-                    <p
-                        class="mt-5 truncate font-semibold text-ink-950 dark:text-white"
-                    >
-                        {{ file.display_name }}
-                    </p>
-                    <p class="mt-1 text-sm text-ink-600 dark:text-ink-300">
-                        {{ formatBytes(file.size_bytes) }}
-                    </p>
-                    <div class="mt-3 flex items-center justify-between gap-3">
-                        <StatusBadge :value="file.visibility" />
-                        <div class="flex items-center gap-2">
+                    <div class="flex items-start justify-between gap-3">
+                        <FileTypeIcon
+                            :name="file.display_name"
+                            :mime-type="file.mime_type"
+                        />
+                        <div class="flex items-center gap-1">
                             <a
                                 class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                                 title="Download"
@@ -928,38 +1137,65 @@ function handleInput(event: Event) {
                                 ><Download class="h-4 w-4"
                             /></a>
                             <button
+                                v-if="file.can_manage"
                                 type="button"
-                                class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
+                                class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                                 title="Share"
                                 @click="createShare(file)"
                             >
                                 <Share2 class="h-4 w-4" />
                             </button>
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
-                                title="Rename"
-                                @click="renameFile(file)"
-                            >
-                                <Pencil class="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
-                                title="Manage access"
-                                @click="manageAccess({ kind: 'file', item: file })"
-                            >
-                                <Users class="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                class="rounded-full p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
-                                title="Move to trash"
-                                @click="trashFile(file)"
-                            >
-                                <Trash2 class="h-4 w-4" />
-                            </button>
+                            <DropdownMenu v-if="file.can_manage">
+                                <DropdownMenuTrigger as-child>
+                                    <button
+                                        type="button"
+                                        class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
+                                        aria-label="File actions"
+                                    >
+                                        <MoreHorizontal class="h-4 w-4" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" class="w-44">
+                                    <DropdownMenuItem @select="renameFile(file)">
+                                        <Pencil class="h-4 w-4" />
+                                        Rename
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        @select="
+                                            manageAccess({
+                                                kind: 'file',
+                                                item: file,
+                                            })
+                                        "
+                                    >
+                                        <Users class="h-4 w-4" />
+                                        Access
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        @select="trashFile(file)"
+                                    >
+                                        <Trash2 class="h-4 w-4" />
+                                        Move to trash
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         </div>
+                    </div>
+                    <p
+                        class="mt-5 min-w-0 truncate font-semibold text-ink-950 dark:text-white"
+                    >
+                        {{ file.display_name }}
+                    </p>
+                    <p class="mt-1 truncate text-sm text-ink-600 dark:text-ink-300">
+                        {{ formatBytes(file.size_bytes) }} ·
+                        {{ formatFileType(file.display_name, file.mime_type) }}
+                    </p>
+                    <div class="mt-auto flex items-center justify-between gap-3 pt-5">
+                        <StatusBadge :value="file.visibility" />
+                        <span class="text-xs text-ink-500 dark:text-ink-400">
+                            {{ formatDate(file.updated_at) }}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -968,58 +1204,81 @@ function handleInput(event: Event) {
                 <div
                     v-for="folder in folderItems"
                     :key="folder.id"
-                    class="grid gap-3 py-4 md:grid-cols-[1fr_auto_auto] md:items-center"
+                    class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center"
                 >
                     <Link
                         :href="`/files?folder=${folder.id}`"
                         class="flex min-w-0 items-center gap-3"
-                        ><Folder class="h-5 w-5 text-brand" /><span
-                            class="truncate font-medium"
-                            >{{ folder.name }}</span
-                        ></Link
                     >
+                        <span
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-brand"
+                        >
+                            <Folder class="h-5 w-5" />
+                        </span>
+                        <span class="min-w-0">
+                            <span class="block truncate font-medium">
+                                {{ folder.name }}
+                            </span>
+                            <span
+                                class="block text-xs text-ink-600 dark:text-ink-300"
+                            >
+                                Folder · {{ formatDate(folder.updated_at) }}
+                            </span>
+                        </span>
+                    </Link>
                     <StatusBadge :value="folder.visibility" />
-                    <div
-                        class="flex flex-wrap justify-start gap-3 text-sm md:justify-end"
-                    >
-                        <button
-                            type="button"
-                            class="text-brand"
-                            @click="renameFolder(folder)"
-                        >
-                            Rename
-                        </button>
-                        <button
-                            type="button"
-                            class="text-brand"
-                            @click="
-                                manageAccess({ kind: 'folder', item: folder })
-                            "
-                        >
-                            Access
-                        </button>
-                        <button
-                            type="button"
-                            class="text-red-600"
-                            @click="trashFolder(folder)"
-                        >
-                            Trash
-                        </button>
-                    </div>
+                    <DropdownMenu v-if="folder.can_manage">
+                        <DropdownMenuTrigger as-child>
+                            <button
+                                type="button"
+                                class="justify-self-start rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10 md:justify-self-end"
+                                aria-label="Folder actions"
+                            >
+                                <MoreHorizontal class="h-4 w-4" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" class="w-44">
+                            <DropdownMenuItem @select="renameFolder(folder)">
+                                <Pencil class="h-4 w-4" />
+                                Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                @select="
+                                    manageAccess({
+                                        kind: 'folder',
+                                        item: folder,
+                                    })
+                                "
+                            >
+                                <Users class="h-4 w-4" />
+                                Access
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                variant="destructive"
+                                @select="trashFolder(folder)"
+                            >
+                                <Trash2 class="h-4 w-4" />
+                                Move to trash
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
                 <div
                     v-for="file in fileItems"
                     :key="file.id"
-                    class="grid gap-3 py-4 md:grid-cols-[1fr_auto_auto_auto] md:items-center"
+                    class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_7rem_auto_auto] md:items-center"
                 >
                     <div class="flex min-w-0 items-center gap-3">
-                        <File class="h-5 w-5 text-brand" />
+                        <FileTypeIcon
+                            :name="file.display_name"
+                            :mime-type="file.mime_type"
+                        />
                         <div class="min-w-0">
                             <p class="truncate font-medium">
                                 {{ file.display_name }}
                             </p>
                             <p class="text-xs text-ink-600 dark:text-ink-300">
-                                {{ file.mime_type }} ·
+                                {{ formatFileType(file.display_name, file.mime_type) }} ·
                                 {{ formatDate(file.updated_at) }}
                             </p>
                         </div>
@@ -1028,47 +1287,68 @@ function handleInput(event: Event) {
                         formatBytes(file.size_bytes)
                     }}</span>
                     <StatusBadge :value="file.visibility" />
-                    <div class="flex flex-wrap gap-3 text-sm">
+                    <div class="flex items-center gap-1 md:justify-end">
                         <a
-                            class="text-brand"
+                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                            title="Download"
                             :href="`/api/files/${file.id}/download`"
-                            >Download</a
-                        >
+                            ><Download class="h-4 w-4"
+                        /></a>
                         <button
+                            v-if="file.can_manage"
                             type="button"
-                            class="text-brand"
+                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                            title="Share"
                             @click="createShare(file)"
                         >
-                            Share
+                            <Share2 class="h-4 w-4" />
                         </button>
-                        <button
-                            type="button"
-                            class="text-brand"
-                            @click="renameFile(file)"
-                        >
-                            Rename
-                        </button>
-                        <button
-                            type="button"
-                            class="text-brand"
-                            @click="manageAccess({ kind: 'file', item: file })"
-                        >
-                            Access
-                        </button>
-                        <button
-                            type="button"
-                            class="text-red-600"
-                            @click="trashFile(file)"
-                        >
-                            Trash
-                        </button>
+                        <DropdownMenu v-if="file.can_manage">
+                            <DropdownMenuTrigger as-child>
+                                <button
+                                    type="button"
+                                    class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
+                                    aria-label="File actions"
+                                >
+                                    <MoreHorizontal class="h-4 w-4" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" class="w-44">
+                                <DropdownMenuItem @select="renameFile(file)">
+                                    <Pencil class="h-4 w-4" />
+                                    Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    @select="
+                                        manageAccess({
+                                            kind: 'file',
+                                            item: file,
+                                        })
+                                    "
+                                >
+                                    <Users class="h-4 w-4" />
+                                    Access
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    variant="destructive"
+                                    @select="trashFile(file)"
+                                >
+                                    <Trash2 class="h-4 w-4" />
+                                    Move to trash
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                 </div>
                 <p
                     v-if="folderItems.length + fileItems.length === 0"
                     class="py-12 text-center text-sm text-ink-600 dark:text-ink-300"
                 >
-                    Drop files here or create a folder.
+                    {{
+                        canManageCurrentLocation
+                            ? 'Drop files here or use New to add a folder.'
+                            : 'No files are available in this view.'
+                    }}
                 </p>
             </div>
         </section>
@@ -1090,6 +1370,97 @@ function handleInput(event: Event) {
                 <PaginationLinks :links="files.links" />
             </div>
         </section>
+
+        <Dialog
+            :open="createFolderOpen"
+            @update:open="($event) => !$event && closeCreateFolderDialog()"
+        >
+            <DialogContent class="sm:max-w-md">
+                <form class="space-y-5" @submit.prevent="createFolder">
+                    <DialogHeader>
+                        <DialogTitle>Create folder</DialogTitle>
+                        <DialogDescription>
+                            Add a folder in the current drive location.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <label class="block space-y-2 text-sm font-medium">
+                        <span>Name</span>
+                        <input
+                            v-model="folderForm.name"
+                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
+                            autocomplete="off"
+                            autofocus
+                        />
+                        <span
+                            v-if="folderForm.errors.name"
+                            class="text-xs text-red-600"
+                            >{{ folderForm.errors.name }}</span
+                        >
+                    </label>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <button
+                            type="button"
+                            class="rounded-2xl border p-4 text-left transition"
+                            :class="
+                                folderForm.visibility === 'private'
+                                    ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
+                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                            "
+                            @click="folderForm.visibility = 'private'"
+                        >
+                            <span class="block font-semibold">Private</span>
+                            <span
+                                class="mt-1 block text-sm text-ink-600 dark:text-ink-300"
+                            >
+                                Owner and admins.
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-2xl border p-4 text-left transition"
+                            :class="
+                                folderForm.visibility === 'workspace'
+                                    ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
+                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                            "
+                            @click="folderForm.visibility = 'workspace'"
+                        >
+                            <span class="block font-semibold">Workspace</span>
+                            <span
+                                class="mt-1 block text-sm text-ink-600 dark:text-ink-300"
+                            >
+                                Signed-in members can view.
+                            </span>
+                        </button>
+                    </div>
+                    <DialogFooter class="gap-2 sm:gap-2">
+                        <button
+                            type="button"
+                            class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                            :disabled="folderForm.processing"
+                            @click="closeCreateFolderDialog"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                            :disabled="
+                                folderForm.processing ||
+                                folderForm.name.trim().length === 0
+                            "
+                        >
+                            <Folder class="h-4 w-4" />
+                            {{
+                                folderForm.processing
+                                    ? 'Creating'
+                                    : 'Create folder'
+                            }}
+                        </button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
 
         <Dialog
             :open="renameTarget !== null"
@@ -1211,12 +1582,6 @@ function handleInput(event: Event) {
                                 Signed-in workspace members can view it.
                             </span>
                         </button>
-                    </div>
-                    <div
-                        class="rounded-2xl border border-line bg-white/70 p-4 text-sm text-ink-600 dark:bg-white/10 dark:text-ink-300"
-                    >
-                        Share links remain separate. Revoking workspace access
-                        does not revoke already-created public links.
                     </div>
                     <DialogFooter class="gap-2 sm:gap-2">
                         <button
@@ -1344,19 +1709,26 @@ function handleInput(event: Event) {
                     class="rounded-[1.1rem] border border-line bg-white/70 p-3 dark:bg-white/10"
                 >
                     <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                            <p
-                                class="truncate font-medium text-ink-950 dark:text-white"
-                            >
-                                {{ upload.name }}
-                            </p>
-                            <p
-                                class="mt-0.5 text-xs text-ink-600 dark:text-ink-300"
-                            >
-                                {{ upload.message }} ·
-                                {{ formatBytes(upload.uploadedBytes) }} /
-                                {{ formatBytes(upload.size) }}
-                            </p>
+                        <div class="flex min-w-0 items-center gap-3">
+                            <FileTypeIcon
+                                :name="upload.name"
+                                :mime-type="upload.mimeType"
+                            />
+                            <div class="min-w-0">
+                                <p
+                                    class="truncate font-medium text-ink-950 dark:text-white"
+                                >
+                                    {{ upload.name }}
+                                </p>
+                                <p
+                                    class="mt-0.5 truncate text-xs text-ink-600 dark:text-ink-300"
+                                >
+                                    {{ formatFileType(upload.name, upload.mimeType) }}
+                                    · {{ upload.message }} ·
+                                    {{ formatBytes(upload.uploadedBytes) }} /
+                                    {{ formatBytes(upload.size) }}
+                                </p>
+                            </div>
                         </div>
                         <span class="text-xs font-semibold text-brand"
                             >{{ upload.progress }}%</span
