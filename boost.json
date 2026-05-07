@@ -1,0 +1,20 @@
+{
+    "agents": [""],
+    "cloud": false,
+    "guidelines": true,
+    "mcp": true,
+    "nightwatch": false,
+    "sail": false,
+    "skills": [
+        "fortify-development",
+        "laravel-best-practices",
+        "wayfinder-development",
+        "pest-testing",
+        "inertia-vue-development",
+        "tailwindcss-development",
+        "frontend-design",
+        "laravel-security",
+        "shadcn-vue",
+        "spatie-laravel-php"
+    ]
+}
