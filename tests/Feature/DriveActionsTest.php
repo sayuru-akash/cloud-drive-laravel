@@ -5,6 +5,7 @@ use App\Enums\ResourceVisibility;
 use App\Enums\ShareMode;
 use App\Enums\ShareResourceType;
 use App\Enums\UploadStatus;
+use App\Models\AuditLog;
 use App\Models\DriveFile;
 use App\Models\FileVersion;
 use App\Models\Folder;
@@ -700,7 +701,8 @@ it('prunes expired trash through the retention command and keeps newer trash res
     expect(Folder::query()->find($expiredFolder->id))->toBeNull()
         ->and(DriveFile::query()->find($expiredFile->id))->toBeNull()
         ->and(ShareLink::query()->where('resource_id', $expiredFile->id)->exists())->toBeFalse()
-        ->and(DriveFile::query()->find($newerFile->id))->not->toBeNull();
+        ->and(DriveFile::query()->find($newerFile->id))->not->toBeNull()
+        ->and(AuditLog::query()->where('action_type', 'trash.pruned')->exists())->toBeTrue();
 });
 
 it('does not remove expired trash metadata if storage deletion fails', function (): void {

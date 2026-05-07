@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\AuditLogger;
 use App\Services\TrashRetentionService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -12,7 +13,7 @@ use Throwable;
 #[Description('Permanently delete trash that has passed the configured retention window')]
 class PruneExpiredTrash extends Command
 {
-    public function handle(TrashRetentionService $trash): int
+    public function handle(TrashRetentionService $trash, AuditLogger $audit): int
     {
         try {
             $stats = $trash->pruneExpired();
@@ -24,6 +25,7 @@ class PruneExpiredTrash extends Command
             return self::FAILURE;
         }
 
+        $audit->log('trash.pruned', 'system', null, $stats);
         $this->components->info("Pruned {$stats['files']} files, {$stats['folders']} folders, and {$stats['objects']} storage objects.");
 
         return self::SUCCESS;
