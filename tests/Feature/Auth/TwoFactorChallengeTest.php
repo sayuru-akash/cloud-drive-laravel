@@ -52,4 +52,26 @@ class TwoFactorChallengeTest extends TestCase
                 ->component('auth/TwoFactorChallenge'),
             );
     }
+
+    public function test_users_can_complete_two_factor_login_with_a_recovery_code(): void
+    {
+        Features::twoFactorAuthentication([
+            'confirm' => true,
+            'confirmPassword' => true,
+        ]);
+
+        $user = User::factory()->withTwoFactor()->create();
+
+        $this->post(route('login'), [
+            'email' => $user->email,
+            'password' => 'password',
+        ])->assertRedirect(route('two-factor.login'));
+
+        $this->post(route('two-factor.login.store'), [
+            'recovery_code' => 'recovery-code-1',
+        ])->assertRedirect(route('dashboard', absolute: false));
+
+        $this->assertAuthenticatedAs($user);
+        expect($user->refresh()->recoveryCodes())->not->toContain('recovery-code-1');
+    }
 }

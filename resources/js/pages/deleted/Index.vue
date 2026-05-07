@@ -1,8 +1,23 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import { File, Folder, Trash2 } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { formatDate } from '@/lib/format';
+
+type DeletedFile = { id: string; display_name: string; deleted_at: string };
+type DeletedFolder = { id: string; name: string; deleted_at: string };
+type DeleteTarget =
+    | { kind: 'file'; item: DeletedFile }
+    | { kind: 'folder'; item: DeletedFolder };
 
 defineProps<{
     files: Array<{ id: string; display_name: string; deleted_at: string }>;
@@ -11,28 +26,45 @@ defineProps<{
     retentionDays: number;
 }>();
 
-function hardDeleteFile(file: { id: string; display_name: string }) {
-    if (
-        window.confirm(
-            `Permanently delete "${file.display_name}"? This cannot be undone.`,
-        )
-    ) {
-        router.delete(`/deleted/files/${file.id}/hard-delete`, {
-            preserveScroll: true,
-        });
+const deleteTarget = ref<DeleteTarget | null>(null);
+const deleteDescription = computed(() => {
+    if (! deleteTarget.value) {
+        return '';
     }
+
+    if (deleteTarget.value.kind === 'folder') {
+        return `Permanently delete "${deleteTarget.value.item.name}" and its contents? This cannot be undone.`;
+    }
+
+    return `Permanently delete "${deleteTarget.value.item.display_name}"? This cannot be undone.`;
+});
+
+function hardDeleteFile(file: DeletedFile) {
+    deleteTarget.value = { kind: 'file', item: file };
 }
 
-function hardDeleteFolder(folder: { id: string; name: string }) {
-    if (
-        window.confirm(
-            `Permanently delete "${folder.name}" and its contents? This cannot be undone.`,
-        )
-    ) {
-        router.delete(`/deleted/folders/${folder.id}/hard-delete`, {
-            preserveScroll: true,
-        });
+function hardDeleteFolder(folder: DeletedFolder) {
+    deleteTarget.value = { kind: 'folder', item: folder };
+}
+
+function closeDeleteDialog() {
+    deleteTarget.value = null;
+}
+
+function confirmHardDelete() {
+    const target = deleteTarget.value;
+
+    if (! target) {
+        return;
     }
+
+    router.delete(
+        target.kind === 'file'
+            ? `/deleted/files/${target.item.id}/hard-delete`
+            : `/deleted/folders/${target.item.id}/hard-delete`,
+        { preserveScroll: true },
+    );
+    closeDeleteDialog();
 }
 </script>
 
@@ -125,5 +157,35 @@ function hardDeleteFolder(folder: { id: string; name: string }) {
                 Trash is empty.
             </p>
         </section>
+
+        <Dialog
+            :open="deleteTarget !== null"
+            @update:open="($event) => !$event && closeDeleteDialog()"
+        >
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Delete forever</DialogTitle>
+                    <DialogDescription>
+                        {{ deleteDescription }}
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter class="gap-2 sm:gap-2">
+                    <button
+                        type="button"
+                        class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                        @click="closeDeleteDialog"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        class="cloud-button bg-red-600 text-white hover:bg-red-700"
+                        @click="confirmHardDelete"
+                    >
+                        Delete forever
+                    </button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

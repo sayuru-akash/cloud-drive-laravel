@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { useAppearance } from '@/composables/useAppearance';
+import { useTheme } from '@/composables/useTheme';
 import { Toaster as SonnerPrimitive } from 'vue-sonner';
 import 'vue-sonner/style.css';
 
-const { appearance } = useAppearance();
+const { theme } = useTheme();
 </script>
 
 <template>
     <SonnerPrimitive
-        :theme="appearance"
+        :theme="theme"
         class="toaster group"
         position="bottom-right"
         :style="{

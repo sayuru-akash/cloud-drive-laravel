@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Form, Head } from '@inertiajs/vue3';
-import { ShieldCheck } from 'lucide-vue-next';
+import { KeyRound, LockKeyhole, ShieldCheck, Smartphone } from 'lucide-vue-next';
 import { onUnmounted, ref } from 'vue';
 import SecurityController from '@/actions/App/Http/Controllers/Settings/SecurityController';
 import Heading from '@/components/Heading.vue';
@@ -8,7 +8,15 @@ import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import TwoFactorRecoveryCodes from '@/components/TwoFactorRecoveryCodes.vue';
 import TwoFactorSetupModal from '@/components/TwoFactorSetupModal.vue';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useTwoFactorAuth } from '@/composables/useTwoFactorAuth';
 import { edit } from '@/routes/security';
@@ -120,57 +128,117 @@ onUnmounted(() => clearTwoFactorAuthData());
         <Heading
             variant="small"
             title="Two-factor authentication"
-            description="Manage your two-factor authentication settings"
+            description="Use an authenticator app to protect this account during login"
         />
 
-        <div
-            v-if="!twoFactorEnabled"
-            class="flex flex-col items-start justify-start space-y-4"
-        >
-            <p class="text-sm text-muted-foreground">
-                When you enable two-factor authentication, you will be prompted
-                for a secure pin during login. This pin can be retrieved from a
-                TOTP-supported application on your phone.
-            </p>
-
-            <div>
-                <Button v-if="hasSetupData" @click="showSetupModal = true">
-                    <ShieldCheck />Continue setup
-                </Button>
-                <Form
-                    v-else
-                    v-bind="enable.form()"
-                    @success="showSetupModal = true"
-                    #default="{ processing }"
+        <Card>
+            <CardHeader>
+                <CardTitle class="flex items-center gap-2">
+                    <ShieldCheck class="size-5 text-brand" />
+                    Authenticator app
+                </CardTitle>
+                <CardDescription>
+                    {{
+                        twoFactorEnabled
+                            ? 'Two-factor authentication is active for this account.'
+                            : 'Set up Google Authenticator, 1Password, Authy, Microsoft Authenticator, or any TOTP app.'
+                    }}
+                </CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-5">
+                <Alert
+                    :class="
+                        twoFactorEnabled
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100'
+                            : ''
+                    "
                 >
-                    <Button type="submit" :disabled="processing">
-                        Enable 2FA
+                    <component
+                        :is="twoFactorEnabled ? ShieldCheck : Smartphone"
+                    />
+                    <AlertTitle>
+                        {{
+                            twoFactorEnabled
+                                ? '2FA is protecting this login'
+                                : '2FA is not enabled yet'
+                        }}
+                    </AlertTitle>
+                    <AlertDescription>
+                        {{
+                            twoFactorEnabled
+                                ? 'Future sign-ins require the password plus a fresh 6-digit authenticator code or a recovery code.'
+                                : 'Enabling 2FA creates a QR code, a manual setup key, and recovery codes for account recovery.'
+                        }}
+                    </AlertDescription>
+                </Alert>
+
+                <div
+                    v-if="!twoFactorEnabled"
+                    class="grid gap-3 rounded-xl border border-line p-4 text-sm text-muted-foreground md:grid-cols-3"
+                >
+                    <div class="space-y-2">
+                        <Smartphone class="size-4 text-brand" />
+                        <p class="font-medium text-foreground">Scan QR</p>
+                        <p>Open your authenticator app and scan the QR code.</p>
+                    </div>
+                    <div class="space-y-2">
+                        <KeyRound class="size-4 text-brand" />
+                        <p class="font-medium text-foreground">Keep backup</p>
+                        <p>Use the setup key if the camera scan is not available.</p>
+                    </div>
+                    <div class="space-y-2">
+                        <LockKeyhole class="size-4 text-brand" />
+                        <p class="font-medium text-foreground">Confirm code</p>
+                        <p>Enter the current 6-digit code to complete setup.</p>
+                    </div>
+                </div>
+
+                <div
+                    v-if="!twoFactorEnabled"
+                    class="flex flex-wrap items-center gap-3"
+                >
+                    <Button v-if="hasSetupData" @click="showSetupModal = true">
+                        <ShieldCheck />Continue setup
                     </Button>
-                </Form>
-            </div>
-        </div>
-
-        <div v-else class="flex flex-col items-start justify-start space-y-4">
-            <p class="text-sm text-muted-foreground">
-                You will be prompted for a secure, random pin during login,
-                which you can retrieve from the TOTP-supported application on
-                your phone.
-            </p>
-
-            <div class="relative inline">
-                <Form v-bind="disable.form()" #default="{ processing }">
-                    <Button
-                        variant="destructive"
-                        type="submit"
-                        :disabled="processing"
+                    <Form
+                        v-else
+                        v-bind="enable.form()"
+                        @success="showSetupModal = true"
+                        #default="{ processing }"
                     >
-                        Disable 2FA
-                    </Button>
-                </Form>
-            </div>
+                        <Button type="submit" :disabled="processing">
+                            <ShieldCheck />
+                            Enable 2FA
+                        </Button>
+                    </Form>
+                </div>
 
-            <TwoFactorRecoveryCodes />
-        </div>
+                <div v-else class="space-y-5">
+                    <TwoFactorRecoveryCodes />
+
+                    <div class="rounded-xl border border-destructive/30 p-4">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h3 class="font-medium">Disable 2FA</h3>
+                                <p class="mt-1 text-sm text-muted-foreground">
+                                    Turning this off removes the authenticator
+                                    requirement and clears recovery codes.
+                                </p>
+                            </div>
+                            <Form v-bind="disable.form()" #default="{ processing }">
+                                <Button
+                                    variant="destructive"
+                                    type="submit"
+                                    :disabled="processing"
+                                >
+                                    Disable 2FA
+                                </Button>
+                            </Form>
+                        </div>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
 
         <TwoFactorSetupModal
             v-model:isOpen="showSetupModal"

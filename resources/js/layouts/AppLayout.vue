@@ -13,15 +13,12 @@ import {
 import { computed } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import ThemeToggle from '@/components/ThemeToggle.vue';
+import type { User } from '@/types';
 
 const page = usePage();
 const user = computed(
-    () =>
-        page.props.auth?.user as {
-            name: string;
-            email: string;
-            role?: string;
-        } | null,
+    () => page.props.auth?.user as User | null,
 );
 const canManageAdmin = computed(() =>
     ['admin', 'super_admin'].includes(user.value?.role ?? ''),
@@ -72,12 +69,17 @@ function signOut() {
                             >Cloud Drive</span
                         >
                     </Link>
-                    <button
-                        class="rounded-full border border-line bg-white px-3 py-2 text-sm text-ink-700 dark:bg-white/10 dark:text-white"
-                        @click="signOut"
-                    >
-                        <LogOut class="h-4 w-4" />
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <ThemeToggle />
+                        <button
+                            class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                            title="Sign out"
+                            aria-label="Sign out"
+                            @click="signOut"
+                        >
+                            <LogOut class="h-4 w-4" />
+                        </button>
+                    </div>
                 </div>
                 <div class="flex gap-2 overflow-x-auto pb-1">
                     <Link
@@ -146,6 +148,8 @@ function signOut() {
                         />
                     </Link>
                 </nav>
+
+                <ThemeToggle class="mt-6" />
 
                 <div
                     class="mt-auto rounded-[1.5rem] border border-line bg-white p-4 dark:bg-white/10"

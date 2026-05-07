@@ -21,6 +21,16 @@ class ProfileUpdateTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_legacy_theme_settings_page_is_not_available(): void
+    {
+        $user = User::factory()->create();
+
+        $this
+            ->actingAs($user)
+            ->get('/settings/'.implode('', ['appear', 'ance']))
+            ->assertNotFound();
+    }
+
     public function test_inactive_users_are_logged_out_before_accessing_profile_settings(): void
     {
         $user = User::factory()->create(['is_active' => false]);

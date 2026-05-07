@@ -13,7 +13,6 @@ use App\Http\Controllers\HealthController;
 use App\Http\Controllers\PublicShareController;
 use App\Http\Controllers\ShareLinkController;
 use Illuminate\Support\Facades\Route;
-use Laravel\Fortify\Features;
 
 Route::get('/robots.txt', function () {
     $sitemap = url('/sitemap.xml');
@@ -53,9 +52,7 @@ Route::get('/sitemap.xml', function () {
 
 Route::get('/api/health', HealthController::class)->name('health');
 
-Route::inertia('/', 'Welcome', [
-    'canRegister' => Features::enabled(Features::registration()),
-])->name('home');
+Route::inertia('/', 'Welcome')->name('home');
 
 Route::inertia('/privacy', 'public/Privacy')->name('privacy');
 Route::get('/s/{token}', [PublicShareController::class, 'show'])->name('public-share.show');
@@ -86,6 +83,7 @@ Route::middleware(['auth', 'verified', 'active'])->group(function () {
 
     Route::middleware('admin')->group(function () {
         Route::get('admin', [AdminController::class, 'index'])->name('admin.index');
+        Route::post('admin/users', [AdminController::class, 'storeUser'])->name('admin.users.store');
         Route::patch('admin/users/{user}', [AdminController::class, 'updateUser'])->name('admin.users.update');
         Route::patch('admin/settings', [AdminController::class, 'updateSettings'])->name('admin.settings.update');
         Route::get('audit', AuditController::class)->name('audit.index');

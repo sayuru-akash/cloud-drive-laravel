@@ -7,10 +7,18 @@ export function initializeFlashToast(): void {
         const flash = (event as CustomEvent).detail?.flash;
         const data = flash?.toast as FlashToast | undefined;
 
-        if (!data) {
+        if (data) {
+            toast[data.type](data.message);
+
             return;
         }
 
-        toast[data.type](data.message);
+        if (typeof flash?.success === 'string' && flash.success.length > 0) {
+            toast.success(flash.success);
+        }
+
+        if (typeof flash?.error === 'string' && flash.error.length > 0) {
+            toast.error(flash.error);
+        }
     });
 }

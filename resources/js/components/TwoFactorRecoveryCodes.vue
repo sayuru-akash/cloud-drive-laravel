@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { Form } from '@inertiajs/vue3';
-import { Eye, EyeOff, LockKeyhole, RefreshCw } from 'lucide-vue-next';
-import { nextTick, onMounted, ref, useTemplateRef } from 'vue';
+import {
+    Check,
+    Copy,
+    Eye,
+    EyeOff,
+    LockKeyhole,
+    RefreshCw,
+    XCircle,
+} from 'lucide-vue-next';
+import { nextTick, ref, useTemplateRef } from 'vue';
 import AlertError from '@/components/AlertError.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,10 +20,12 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { useTwoFactorAuth } from '@/composables/useTwoFactorAuth';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { regenerateRecoveryCodes } from '@/routes/two-factor';
 
 const { recoveryCodesList, fetchRecoveryCodes, errors } = useTwoFactorAuth();
 const isRecoveryCodesVisible = ref<boolean>(false);
+const copyStatus = ref<'idle' | 'copied' | 'blocked'>('idle');
 const recoveryCodeSectionRef = useTemplateRef('recoveryCodeSectionRef');
 
 const toggleRecoveryCodesVisibility = async () => {
@@ -31,11 +41,18 @@ const toggleRecoveryCodesVisibility = async () => {
     }
 };
 
-onMounted(async () => {
+const copyRecoveryCodes = async (): Promise<void> => {
     if (!recoveryCodesList.value.length) {
-        await fetchRecoveryCodes();
+        return;
     }
-});
+
+    const copied = await copyTextToClipboard(recoveryCodesList.value.join('\n'));
+    copyStatus.value = copied ? 'copied' : 'blocked';
+
+    window.setTimeout(() => {
+        copyStatus.value = 'idle';
+    }, 1800);
+};
 </script>
 
 <template>
@@ -50,9 +67,7 @@ onMounted(async () => {
             </CardDescription>
         </CardHeader>
         <CardContent>
-            <div
-                class="flex flex-col gap-3 select-none sm:flex-row sm:items-center sm:justify-between"
-            >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <Button @click="toggleRecoveryCodesVisibility" class="w-fit">
                     <component
                         :is="isRecoveryCodesVisible ? EyeOff : Eye"
@@ -62,22 +77,56 @@ onMounted(async () => {
                     codes
                 </Button>
 
-                <Form
+                <div
                     v-if="isRecoveryCodesVisible && recoveryCodesList.length"
-                    v-bind="regenerateRecoveryCodes.form()"
-                    method="post"
-                    :options="{ preserveScroll: true }"
-                    @success="fetchRecoveryCodes"
-                    #default="{ processing }"
+                    class="flex flex-wrap gap-2"
                 >
                     <Button
-                        variant="secondary"
-                        type="submit"
-                        :disabled="processing"
+                        type="button"
+                        variant="outline"
+                        :aria-label="
+                            copyStatus === 'copied'
+                                ? 'Recovery codes copied'
+                                : 'Copy recovery codes'
+                        "
+                        @click="copyRecoveryCodes"
                     >
-                        <RefreshCw /> Regenerate codes
+                        <Check
+                            v-if="copyStatus === 'copied'"
+                            class="size-4 text-green-500"
+                        />
+                        <XCircle
+                            v-else-if="copyStatus === 'blocked'"
+                            class="size-4 text-destructive"
+                        />
+                        <Copy v-else class="size-4" />
+                        {{
+                            copyStatus === 'copied'
+                                ? 'Copied'
+                                : copyStatus === 'blocked'
+                                  ? 'Blocked'
+                                  : 'Copy'
+                        }}
                     </Button>
-                </Form>
+                    <Form
+                        v-bind="regenerateRecoveryCodes.form()"
+                        method="post"
+                        :options="{ preserveScroll: true }"
+                        @success="
+                            fetchRecoveryCodes();
+                            copyStatus = 'idle';
+                        "
+                        #default="{ processing }"
+                    >
+                        <Button
+                            variant="secondary"
+                            type="submit"
+                            :disabled="processing"
+                        >
+                            <RefreshCw /> Regenerate codes
+                        </Button>
+                    </Form>
+                </div>
             </div>
             <div
                 :class="[

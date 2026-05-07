@@ -1,15 +1,31 @@
 <script setup lang="ts">
 import { Download } from 'lucide-vue-next';
+import { computed } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
 import SeoHead from '@/components/SeoHead.vue';
-import { formatBytes } from '@/lib/format';
+import { formatBytes, formatDate } from '@/lib/format';
 
-defineProps<{
+const props = defineProps<{
     available: boolean;
-    file: { display_name: string; size_bytes: number } | null;
+    status: 'active' | 'invalid' | 'revoked' | 'expired' | 'unavailable';
+    file: { display_name: string; size_bytes: number; mime_type?: string } | null;
     downloadUrl: string | null;
+    expiresAt: string | null;
 }>();
+
+const unavailableMessage = computed(() => {
+    switch (props.status) {
+        case 'expired':
+            return 'This share link has expired.';
+        case 'revoked':
+            return 'This share link has been revoked.';
+        case 'unavailable':
+            return 'This file is no longer available.';
+        default:
+            return 'This share link is not valid.';
+    }
+});
 </script>
 
 <template>
@@ -31,7 +47,8 @@ defineProps<{
                         {{ file.display_name }}
                     </h1>
                     <p class="mt-3 text-sm text-ink-600 dark:text-ink-300">
-                        {{ formatBytes(file.size_bytes) }} · download-only share
+                        {{ formatBytes(file.size_bytes) }} · expires
+                        {{ formatDate(expiresAt) }}
                     </p>
                     <a
                         :href="downloadUrl ?? '#'"
@@ -46,7 +63,7 @@ defineProps<{
                         Link unavailable
                     </h1>
                     <p class="mt-3 text-sm text-ink-600 dark:text-ink-300">
-                        This share may be expired, revoked, or deleted.
+                        {{ unavailableMessage }}
                     </p>
                 </template>
             </section>

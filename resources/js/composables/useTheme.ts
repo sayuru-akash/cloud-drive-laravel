@@ -1,16 +1,16 @@
 import type { ComputedRef, Ref } from 'vue';
 import { computed, onMounted, ref } from 'vue';
-import type { Appearance, ResolvedAppearance } from '@/types';
+import type { ResolvedTheme, ThemePreference } from '@/types';
 
-export type { Appearance, ResolvedAppearance };
+export type { ResolvedTheme, ThemePreference };
 
-export type UseAppearanceReturn = {
-    appearance: Ref<Appearance>;
-    resolvedAppearance: ComputedRef<ResolvedAppearance>;
-    updateAppearance: (value: Appearance) => void;
+export type UseThemeReturn = {
+    theme: Ref<ThemePreference>;
+    resolvedTheme: ComputedRef<ResolvedTheme>;
+    updateThemePreference: (value: ThemePreference) => void;
 };
 
-export function updateTheme(value: Appearance): void {
+export function applyTheme(value: ThemePreference): void {
     if (typeof window === 'undefined') {
         return;
     }
@@ -48,12 +48,12 @@ const mediaQuery = () => {
     return window.matchMedia('(prefers-color-scheme: dark)');
 };
 
-const getStoredAppearance = () => {
+const getStoredTheme = () => {
     if (typeof window === 'undefined') {
         return null;
     }
 
-    return localStorage.getItem('appearance') as Appearance | null;
+    return localStorage.getItem('theme') as ThemePreference | null;
 };
 
 const prefersDark = (): boolean => {
@@ -65,9 +65,9 @@ const prefersDark = (): boolean => {
 };
 
 const handleSystemThemeChange = () => {
-    const currentAppearance = getStoredAppearance();
+    const currentTheme = getStoredTheme();
 
-    updateTheme(currentAppearance || 'system');
+    applyTheme(currentTheme || 'system');
 };
 
 export function initializeTheme(): void {
@@ -75,50 +75,43 @@ export function initializeTheme(): void {
         return;
     }
 
-    // Initialize theme from saved preference or default to system...
-    const savedAppearance = getStoredAppearance();
-    updateTheme(savedAppearance || 'system');
+    const savedTheme = getStoredTheme();
+    applyTheme(savedTheme || 'system');
 
-    // Set up system theme change listener...
     mediaQuery()?.addEventListener('change', handleSystemThemeChange);
 }
 
-const appearance = ref<Appearance>('system');
+const theme = ref<ThemePreference>('system');
 
-export function useAppearance(): UseAppearanceReturn {
+export function useTheme(): UseThemeReturn {
     onMounted(() => {
-        const savedAppearance = localStorage.getItem(
-            'appearance',
-        ) as Appearance | null;
+        const savedTheme = localStorage.getItem('theme') as ThemePreference | null;
 
-        if (savedAppearance) {
-            appearance.value = savedAppearance;
+        if (savedTheme) {
+            theme.value = savedTheme;
         }
     });
 
-    const resolvedAppearance = computed<ResolvedAppearance>(() => {
-        if (appearance.value === 'system') {
+    const resolvedTheme = computed<ResolvedTheme>(() => {
+        if (theme.value === 'system') {
             return prefersDark() ? 'dark' : 'light';
         }
 
-        return appearance.value;
+        return theme.value;
     });
 
-    function updateAppearance(value: Appearance) {
-        appearance.value = value;
+    function updateThemePreference(value: ThemePreference) {
+        theme.value = value;
 
-        // Store in localStorage for client-side persistence...
-        localStorage.setItem('appearance', value);
+        localStorage.setItem('theme', value);
+        setCookie('theme', value);
 
-        // Store in cookie for SSR...
-        setCookie('appearance', value);
-
-        updateTheme(value);
+        applyTheme(value);
     }
 
     return {
-        appearance,
-        resolvedAppearance,
-        updateAppearance,
+        theme,
+        resolvedTheme,
+        updateThemePreference,
     };
 }

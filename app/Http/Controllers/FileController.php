@@ -12,8 +12,13 @@ use Illuminate\Http\Request;
 
 class FileController extends Controller
 {
-    public function update(Request $request, DriveFile $file, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
+    public function update(Request $request, string $file, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
     {
+        $file = $this->resolveActionFile($file);
+        if (! $file) {
+            return $this->missingFileRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $file), 403);
         $data = $request->validate([
             'display_name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -37,12 +42,31 @@ class FileController extends Controller
         return back()->with('success', 'File updated.');
     }
 
-    public function destroy(Request $request, DriveFile $file, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
+    public function destroy(Request $request, string $file, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
     {
+        $file = $this->resolveActionFile($file);
+        if (! $file) {
+            return $this->missingFileRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $file), 403);
         $file->update(['is_deleted' => true, 'status' => 'deleted', 'deleted_at' => now()]);
         $audit->log('file.deleted', 'file', $file->id, ['name' => $file->display_name], $request);
 
         return back()->with('success', 'File moved to trash.');
+    }
+
+    private function resolveActionFile(string $fileId): ?DriveFile
+    {
+        return DriveFile::query()
+            ->where('is_deleted', false)
+            ->find($fileId);
+    }
+
+    private function missingFileRedirect(): RedirectResponse
+    {
+        return redirect()
+            ->route('files.index')
+            ->with('error', 'That file is no longer available.');
     }
 }

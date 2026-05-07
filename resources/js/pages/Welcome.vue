@@ -4,8 +4,6 @@ import { ArrowRight, Lock, ShieldCheck, UploadCloud } from 'lucide-vue-next';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
 import SeoHead from '@/components/SeoHead.vue';
-
-defineProps<{ canRegister: boolean }>();
 </script>
 
 <template>
@@ -39,12 +37,6 @@ defineProps<{ canRegister: boolean }>();
                             href="/login"
                             class="cloud-button border border-line bg-white/80 dark:bg-white/10"
                             >Log in</Link
-                        >
-                        <Link
-                            v-if="canRegister"
-                            href="/register"
-                            class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
-                            >Create account</Link
                         >
                     </template>
                 </nav>

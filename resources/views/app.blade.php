@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}"  @class(['dark' => ($appearance ?? 'system') == 'dark'])>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}"  @class(['dark' => ($theme ?? 'system') == 'dark'])>
     <head>
         @php
             $appName = config('app.name') === 'Laravel' ? 'Cloud Drive' : config('app.name', 'Cloud Drive');
@@ -37,9 +37,9 @@
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>
             (function() {
-                const appearance = '{{ $appearance ?? "system" }}';
+                const theme = '{{ $theme ?? "system" }}';
 
-                if (appearance === 'system') {
+                if (theme === 'system') {
                     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
                     if (prefersDark) {

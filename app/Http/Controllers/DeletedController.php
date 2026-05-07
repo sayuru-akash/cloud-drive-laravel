@@ -40,8 +40,13 @@ class DeletedController extends Controller
         ]);
     }
 
-    public function restoreFile(Request $request, DriveFile $file, AppSettingsService $settings, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
+    public function restoreFile(Request $request, string $file, AppSettingsService $settings, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
     {
+        $file = DriveFile::query()->where('is_deleted', true)->find($file);
+        if (! $file) {
+            return $this->missingTrashRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $file), 403);
         abort_unless($permissions->isAdmin($request->user()) || ! $file->deleted_at || $file->deleted_at->addDays($settings->values()['retentionDays'])->isFuture(), 403);
         $file->update([
@@ -54,8 +59,13 @@ class DeletedController extends Controller
         return back()->with('success', 'File restored.');
     }
 
-    public function restoreFolder(Request $request, Folder $folder, AppSettingsService $settings, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
+    public function restoreFolder(Request $request, string $folder, AppSettingsService $settings, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
     {
+        $folder = Folder::query()->where('is_deleted', true)->find($folder);
+        if (! $folder) {
+            return $this->missingTrashRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $folder), 403);
         abort_unless($permissions->isAdmin($request->user()) || ! $folder->deleted_at || $folder->deleted_at->addDays($settings->values()['retentionDays'])->isFuture(), 403);
         $folderIds = $drive->descendantFolderIds($folder->id);
@@ -74,9 +84,14 @@ class DeletedController extends Controller
         return back()->with('success', 'Folder restored.');
     }
 
-    public function hardDeleteFile(Request $request, DriveFile $file, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
+    public function hardDeleteFile(Request $request, string $file, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
     {
         abort_unless($request->user()->isAdmin(), 403);
+        $file = DriveFile::query()->where('is_deleted', true)->find($file);
+        if (! $file) {
+            return $this->missingTrashRedirect();
+        }
+
         foreach ($file->versions as $version) {
             rescue(fn () => $storage->deleteObject($version->storage_key), report: false);
         }
@@ -90,9 +105,14 @@ class DeletedController extends Controller
         return back()->with('success', 'File permanently deleted.');
     }
 
-    public function hardDeleteFolder(Request $request, Folder $folder, DriveQueryService $drive, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
+    public function hardDeleteFolder(Request $request, string $folder, DriveQueryService $drive, ObjectStorageService $storage, AuditLogger $audit): RedirectResponse
     {
         abort_unless($request->user()->isAdmin(), 403);
+        $folder = Folder::query()->where('is_deleted', true)->find($folder);
+        if (! $folder) {
+            return $this->missingTrashRedirect();
+        }
+
         $folderIds = $drive->descendantFolderIds($folder->id);
         $files = DriveFile::query()->with('versions')->whereIn('folder_id', $folderIds)->get();
 
@@ -111,5 +131,12 @@ class DeletedController extends Controller
         $audit->log('folder.hard_deleted', 'folder', $folder->id, ['folderIds' => $folderIds, 'fileCount' => $files->count()], $request);
 
         return back()->with('success', 'Folder permanently deleted.');
+    }
+
+    private function missingTrashRedirect(): RedirectResponse
+    {
+        return redirect()
+            ->route('deleted.index')
+            ->with('error', 'That deleted item is no longer available.');
     }
 }

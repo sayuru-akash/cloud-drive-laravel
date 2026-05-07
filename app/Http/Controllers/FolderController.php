@@ -39,8 +39,13 @@ class FolderController extends Controller
         return back()->with('success', 'Folder created.');
     }
 
-    public function update(Request $request, Folder $folder, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
+    public function update(Request $request, string $folder, DrivePermissionService $permissions, DriveQueryService $drive, AuditLogger $audit): RedirectResponse
     {
+        $folder = $this->resolveActionFolder($folder);
+        if (! $folder) {
+            return $this->missingFolderRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $folder), 403);
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -65,8 +70,13 @@ class FolderController extends Controller
         return back()->with('success', 'Folder updated.');
     }
 
-    public function destroy(Request $request, Folder $folder, DriveQueryService $drive, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
+    public function destroy(Request $request, string $folder, DriveQueryService $drive, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse
     {
+        $folder = $this->resolveActionFolder($folder);
+        if (! $folder) {
+            return $this->missingFolderRedirect();
+        }
+
         abort_unless($permissions->canManage($request->user(), $folder), 403);
         $ids = $drive->descendantFolderIds($folder->id);
         Folder::query()->whereIn('id', $ids)->update(['is_deleted' => true, 'deleted_at' => now()]);
@@ -74,5 +84,19 @@ class FolderController extends Controller
         $audit->log('folder.deleted', 'folder', $folder->id, ['folderIds' => $ids], $request);
 
         return back()->with('success', 'Folder moved to trash.');
+    }
+
+    private function resolveActionFolder(string $folderId): ?Folder
+    {
+        return Folder::query()
+            ->where('is_deleted', false)
+            ->find($folderId);
+    }
+
+    private function missingFolderRedirect(): RedirectResponse
+    {
+        return redirect()
+            ->route('files.index')
+            ->with('error', 'That folder is no longer available.');
     }
 }

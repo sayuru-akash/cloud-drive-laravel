@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Form } from '@inertiajs/vue3';
-import { useClipboard } from '@vueuse/core';
-import { Check, Copy, ScanLine } from 'lucide-vue-next';
+import { Check, Copy, ScanLine, XCircle } from 'lucide-vue-next';
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue';
 import AlertError from '@/components/AlertError.vue';
 import InputError from '@/components/InputError.vue';
@@ -19,8 +18,9 @@ import {
     InputOTPSlot,
 } from '@/components/ui/input-otp';
 import { Spinner } from '@/components/ui/spinner';
-import { useAppearance } from '@/composables/useAppearance';
+import { useTheme } from '@/composables/useTheme';
 import { useTwoFactorAuth } from '@/composables/useTwoFactorAuth';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { confirm } from '@/routes/two-factor';
 import type { TwoFactorConfigContent } from '@/types';
 
@@ -29,17 +29,17 @@ type Props = {
     twoFactorEnabled: boolean;
 };
 
-const { resolvedAppearance } = useAppearance();
+const { resolvedTheme } = useTheme();
 
 const props = defineProps<Props>();
 const isOpen = defineModel<boolean>('isOpen');
 
-const { copy, copied } = useClipboard();
 const { qrCodeSvg, manualSetupKey, clearSetupData, fetchSetupData, errors } =
     useTwoFactorAuth();
 
 const showVerificationStep = ref(false);
 const code = ref<string>('');
+const copySetupKeyStatus = ref<'idle' | 'copied' | 'blocked'>('idle');
 
 const pinInputContainerRef = useTemplateRef('pinInputContainerRef');
 
@@ -91,6 +91,16 @@ const resetModalState = () => {
 
     showVerificationStep.value = false;
     code.value = '';
+    copySetupKeyStatus.value = 'idle';
+};
+
+const copySetupKey = async (): Promise<void> => {
+    const copied = await copyTextToClipboard(manualSetupKey.value ?? '');
+    copySetupKeyStatus.value = copied ? 'copied' : 'blocked';
+
+    window.setTimeout(() => {
+        copySetupKeyStatus.value = 'idle';
+    }, 1800);
 };
 
 watch(
@@ -175,7 +185,7 @@ watch(
                                         class="flex aspect-square size-full items-center justify-center"
                                         :style="{
                                             filter:
-                                                resolvedAppearance === 'dark'
+                                                resolvedTheme === 'dark'
                                                     ? 'invert(1) brightness(1.5)'
                                                     : undefined,
                                         }"
@@ -197,7 +207,7 @@ watch(
                                 class="absolute inset-0 top-1/2 h-px w-full bg-border"
                             />
                             <span class="relative bg-card px-2 py-1"
-                                >or, enter the code manually</span
+                                >or enter the setup key manually</span
                             >
                         </div>
 
@@ -218,21 +228,45 @@ watch(
                                         type="text"
                                         readonly
                                         :value="manualSetupKey"
-                                        class="h-full w-full bg-background p-3 text-foreground"
+                                        class="h-full w-full bg-background p-3 font-mono text-sm text-foreground"
                                     />
                                     <button
-                                        @click="copy(manualSetupKey || '')"
-                                        class="relative block h-auto border-l border-border px-3 hover:bg-muted"
+                                        type="button"
+                                        :aria-label="
+                                            copySetupKeyStatus === 'copied'
+                                                ? 'Setup key copied'
+                                                : 'Copy setup key'
+                                        "
+                                        class="relative flex h-auto min-w-24 items-center justify-center gap-2 border-l border-border px-3 text-sm hover:bg-muted"
+                                        @click="copySetupKey"
                                     >
                                         <Check
-                                            v-if="copied"
+                                            v-if="copySetupKeyStatus === 'copied'"
                                             class="w-4 text-green-500"
                                         />
+                                        <XCircle
+                                            v-else-if="
+                                                copySetupKeyStatus === 'blocked'
+                                            "
+                                            class="w-4 text-destructive"
+                                        />
                                         <Copy v-else class="w-4" />
+                                        <span>{{
+                                            copySetupKeyStatus === 'copied'
+                                                ? 'Copied'
+                                                : copySetupKeyStatus ===
+                                                    'blocked'
+                                                  ? 'Blocked'
+                                                  : 'Copy'
+                                        }}</span>
                                     </button>
                                 </template>
                             </div>
                         </div>
+                        <p class="text-center text-xs text-muted-foreground">
+                            Keep the setup key private. Anyone with this key can
+                            generate valid login codes.
+                        </p>
                     </template>
                 </template>
 

@@ -13,6 +13,8 @@ const classes: Record<string, string> = {
     revoked: 'bg-red-50 text-red-700 dark:bg-red-400/15 dark:text-red-200',
     expired:
         'bg-amber-50 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200',
+    unavailable:
+        'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200',
 };
 </script>
 

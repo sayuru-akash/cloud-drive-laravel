@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['resource_type', 'resource_id', 'token_hash', 'created_by_user_id', 'mode', 'password_hash', 'expires_at', 'is_revoked'])]
+#[Fillable(['resource_type', 'resource_id', 'token_hash', 'token_encrypted', 'created_by_user_id', 'mode', 'password_hash', 'expires_at', 'is_revoked'])]
 class ShareLink extends Model
 {
     use HasPrefixedId;
@@ -28,6 +28,7 @@ class ShareLink extends Model
         return [
             'resource_type' => ShareResourceType::class,
             'mode' => ShareMode::class,
+            'token_encrypted' => 'encrypted',
             'expires_at' => 'datetime',
             'is_revoked' => 'boolean',
         ];

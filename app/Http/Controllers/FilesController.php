@@ -6,15 +6,22 @@ use App\Models\Folder;
 use App\Services\AppSettingsService;
 use App\Services\DrivePermissionService;
 use App\Services\DriveQueryService;
+use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class FilesController extends Controller
 {
-    public function index(DriveQueryService $drive, DrivePermissionService $permissions, AppSettingsService $settings): Response
+    public function index(DriveQueryService $drive, DrivePermissionService $permissions, AppSettingsService $settings): Response|RedirectResponse
     {
         $folderId = request('folder');
-        $folder = $folderId ? Folder::query()->findOrFail($folderId) : null;
+        $folder = $folderId ? Folder::query()->find($folderId) : null;
+
+        if ($folderId && (! $folder || $folder->is_deleted)) {
+            return redirect()
+                ->route('files.index')
+                ->with('error', 'That folder is no longer available.');
+        }
 
         if ($folder) {
             abort_unless($permissions->canView(request()->user(), $folder), 403);
