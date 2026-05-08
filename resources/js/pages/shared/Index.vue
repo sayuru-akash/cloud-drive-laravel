@@ -5,6 +5,7 @@ import {
     Check,
     Copy,
     ExternalLink,
+    Folder,
     LoaderCircle,
     Trash2,
 } from 'lucide-vue-next';
@@ -28,6 +29,7 @@ import { formatDate } from '@/lib/format';
 type ShareItem = {
     id: string;
     resource_id: string;
+    resource_type: 'file' | 'folder';
     mode: string;
     status: 'active' | 'expired' | 'revoked' | 'unavailable';
     public_url: string | null;
@@ -36,6 +38,7 @@ type ShareItem = {
     created_at: string;
     creator?: { name: string | null; email: string | null } | null;
     file?: { display_name: string; size_bytes: number; mime_type: string } | null;
+    folder?: { name: string; updated_at: string } | null;
 };
 
 defineProps<{
@@ -52,6 +55,24 @@ const failedShareId = ref<string | null>(null);
 const revokeTarget = ref<ShareItem | null>(null);
 const revokeProcessing = ref(false);
 const sharesRefreshProps = ['shares', 'flash'];
+
+function shareName(share: ShareItem) {
+    return share.resource_type === 'folder'
+        ? (share.folder?.name ?? share.resource_id)
+        : (share.file?.display_name ?? share.resource_id);
+}
+
+function shareMimeType(share: ShareItem) {
+    return share.resource_type === 'folder'
+        ? null
+        : (share.file?.mime_type ?? null);
+}
+
+function shareTypeLabel(share: ShareItem) {
+    return share.resource_type === 'folder'
+        ? 'Folder'
+        : formatFileType(shareName(share), shareMimeType(share));
+}
 
 function resetFlashCopyState() {
     window.setTimeout(() => {
@@ -211,25 +232,27 @@ function confirmRevoke() {
             >
                 <div class="min-w-0">
                     <div class="flex min-w-0 items-center gap-3">
+                        <span
+                            v-if="share.resource_type === 'folder'"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand/10 text-brand"
+                        >
+                            <Folder class="h-5 w-5" />
+                        </span>
                         <FileTypeIcon
-                            :name="share.file?.display_name ?? share.resource_id"
-                            :mime-type="share.file?.mime_type ?? null"
+                            v-else
+                            :name="shareName(share)"
+                            :mime-type="shareMimeType(share)"
                         />
                         <p
                             class="truncate font-medium text-ink-950 dark:text-white"
                         >
-                            {{ share.file?.display_name ?? share.resource_id }}
+                            {{ shareName(share) }}
                         </p>
                     </div>
                     <p
                         class="mt-1 text-xs text-ink-600 dark:text-ink-300"
                     >
-                        {{
-                            formatFileType(
-                                share.file?.display_name ?? share.resource_id,
-                                share.file?.mime_type ?? null,
-                            )
-                        }}
+                        {{ shareTypeLabel(share) }}
                         · Created {{ formatDate(share.created_at) }} · Expires
                         {{ formatDate(share.expires_at) }}
                     </p>
@@ -326,8 +349,9 @@ function confirmRevoke() {
                     <DialogTitle>Revoke share link</DialogTitle>
                     <DialogDescription>
                         {{
-                            revokeTarget?.file?.display_name ??
-                            'This share link'
+                            revokeTarget
+                                ? shareName(revokeTarget)
+                                : 'This share link'
                         }}
                     </DialogDescription>
                 </DialogHeader>
@@ -335,7 +359,7 @@ function confirmRevoke() {
                     class="rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-700 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200"
                 >
                     The public link stops working immediately. The original
-                    file stays in Drive and can be shared again later.
+                    resource stays in Drive and can be shared again later.
                 </div>
                 <DialogFooter class="gap-2 sm:gap-2">
                     <button

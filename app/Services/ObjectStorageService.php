@@ -132,6 +132,15 @@ class ObjectStorageService
         return (string) $this->client()->createPresignedRequest($command, '+5 minutes')->getUri();
     }
 
+    public function writeObjectToPath(string $storageKey, string $destination): void
+    {
+        $this->client()->getObject([
+            'Bucket' => $this->bucket(),
+            'Key' => $storageKey,
+            'SaveAs' => $destination,
+        ]);
+    }
+
     public function downloadDisposition(?string $filename): string
     {
         if (! $filename) {

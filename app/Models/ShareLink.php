@@ -43,4 +43,9 @@ class ShareLink extends Model
     {
         return $this->belongsTo(DriveFile::class, 'resource_id');
     }
+
+    public function folder(): BelongsTo
+    {
+        return $this->belongsTo(Folder::class, 'resource_id');
+    }
 }

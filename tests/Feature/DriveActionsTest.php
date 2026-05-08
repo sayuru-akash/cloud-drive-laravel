@@ -372,6 +372,224 @@ it('creates a download share with a chosen expiry and exposes only safe public p
         );
 });
 
+it('creates a folder share with a public browser that exposes only folder contents', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Client pack',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $child = Folder::query()->create([
+        'parent_folder_id' => $folder->id,
+        'name' => 'Contracts',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $file = DriveFile::query()->create([
+        'folder_id' => $folder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'overview.pdf',
+        'display_name' => 'overview.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/overview.pdf',
+        'size_bytes' => 512,
+        'mime_type' => 'application/pdf',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $file->update(['current_version_id' => $version->id]);
+    DriveFile::query()->create([
+        'folder_id' => $folder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'pending.pdf',
+        'display_name' => 'pending.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $response = $this->actingAs($owner)
+        ->from('/files')
+        ->post("/folders/{$folder->id}/shares", ['expires_days' => 7, 'mode' => 'download'])
+        ->assertRedirect('/files')
+        ->assertSessionHas('shareUrl');
+
+    $share = ShareLink::query()->sole();
+    $shareUrl = $response->baseResponse->getSession()->get('shareUrl');
+    $token = basename((string) parse_url((string) $shareUrl, PHP_URL_PATH));
+
+    expect($share->resource_type)->toBe(ShareResourceType::Folder)
+        ->and($share->resource_id)->toBe($folder->id)
+        ->and($share->token_encrypted)->toBe($token);
+
+    $this->get("/s/{$token}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('public/Share')
+            ->where('available', true)
+            ->where('resourceType', 'folder')
+            ->where('folder.name', 'Client pack')
+            ->where('folders.0.id', $child->id)
+            ->where('files.0.id', $file->id)
+            ->where('files.0.display_name', 'overview.pdf')
+            ->where('folderDownload.file_count', 1)
+            ->missing('files.0.owner_user_id')
+            ->missing('files.0.current_version_id')
+            ->missing('token_hash'),
+        );
+});
+
+it('allows folder share downloads only for ready files inside the shared folder tree', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Shared root',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $inside = DriveFile::query()->create([
+        'folder_id' => $folder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'inside.txt',
+        'display_name' => 'inside.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $inside->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/inside.txt',
+        'size_bytes' => 12,
+        'mime_type' => 'text/plain',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $inside->update(['current_version_id' => $version->id]);
+    $outside = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'outside.txt',
+        'display_name' => 'outside.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $outsideVersion = FileVersion::query()->create([
+        'file_id' => $outside->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/outside.txt',
+        'size_bytes' => 12,
+        'mime_type' => 'text/plain',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $outside->update(['current_version_id' => $outsideVersion->id]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::Folder,
+        'resource_id' => $folder->id,
+        'token_hash' => hash('sha256', 'folder-token'),
+        'token_encrypted' => 'folder-token',
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
+        ->twice()
+        ->andReturnTrue();
+    $storage->shouldReceive('createDownloadUrl')
+        ->once()
+        ->with('objects/inside.txt', 'inside.txt')
+        ->andReturn('https://storage.example/inside');
+
+    $this->get("/api/public-share/folder-token/files/{$inside->id}/download")
+        ->assertRedirect('https://storage.example/inside');
+
+    $this->get("/api/public-share/folder-token/files/{$outside->id}/download")
+        ->assertNotFound();
+});
+
+it('downloads a folder share as a zip archive', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Client pack',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $child = Folder::query()->create([
+        'parent_folder_id' => $folder->id,
+        'name' => 'Contracts',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $file = DriveFile::query()->create([
+        'folder_id' => $child->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'agreement.txt',
+        'display_name' => 'agreement.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 9,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/agreement.txt',
+        'size_bytes' => 9,
+        'mime_type' => 'text/plain',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $file->update(['current_version_id' => $version->id]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::Folder,
+        'resource_id' => $folder->id,
+        'token_hash' => hash('sha256', 'folder-token'),
+        'token_encrypted' => 'folder-token',
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')
+        ->once()
+        ->andReturnTrue();
+    $storage->shouldReceive('writeObjectToPath')
+        ->once()
+        ->with('objects/agreement.txt', Mockery::on(function (string $destination): bool {
+            file_put_contents($destination, 'agreement');
+
+            return true;
+        }));
+
+    $this->get('/api/public-share/folder-token/download')
+        ->assertDownload('Client pack.zip');
+
+    expect(AuditLog::query()->where('action_type', 'folder.downloaded')->exists())->toBeTrue();
+});
+
 it('does not expose share token hashes in the shared links page', function (): void {
     $owner = User::factory()->create();
     $file = DriveFile::query()->create([
@@ -412,6 +630,39 @@ it('does not expose share token hashes in the shared links page', function (): v
             ->where('shares.data.0.status', 'active')
             ->where('shares.data.0.public_url', route('public-share.show', ['token' => 'token']))
             ->where('shares.data.0.file.display_name', 'shared.txt')
+            ->missing('shares.data.0.token_hash')
+            ->missing('shares.data.0.token_encrypted')
+            ->missing('shares.data.0.password_hash'),
+        );
+});
+
+it('shows active folder shares on the shared links page without token hashes', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Folder share',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::Folder,
+        'resource_id' => $folder->id,
+        'token_hash' => hash('sha256', 'folder-token'),
+        'token_encrypted' => 'folder-token',
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $this->actingAs($owner)
+        ->get('/shared')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('shared/Index')
+            ->where('shares.data.0.resource_type', 'folder')
+            ->where('shares.data.0.status', 'active')
+            ->where('shares.data.0.folder.name', 'Folder share')
+            ->where('shares.data.0.public_url', route('public-share.show', ['token' => 'folder-token']))
             ->missing('shares.data.0.token_hash')
             ->missing('shares.data.0.token_encrypted')
             ->missing('shares.data.0.password_hash'),

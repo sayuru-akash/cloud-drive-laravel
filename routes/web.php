@@ -40,6 +40,7 @@ Route::inertia('/', 'Welcome')->name('home');
 Route::inertia('/privacy', 'public/Privacy')->name('privacy');
 Route::get('/s/{token}', [PublicShareController::class, 'show'])->name('public-share.show');
 Route::get('/api/public-share/{token}/download', [PublicShareController::class, 'download'])->name('public-share.download');
+Route::get('/api/public-share/{token}/files/{file}/download', [PublicShareController::class, 'downloadFile'])->name('public-share.files.download');
 
 Route::middleware(['auth', 'verified', 'active'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
@@ -50,6 +51,7 @@ Route::middleware(['auth', 'verified', 'active'])->group(function () {
     Route::patch('files/{file}', [FileController::class, 'update'])->name('files.update');
     Route::delete('files/{file}', [FileController::class, 'destroy'])->name('files.destroy');
     Route::post('files/{file}/shares', [ShareLinkController::class, 'store'])->name('files.shares.store');
+    Route::post('folders/{folder}/shares', [ShareLinkController::class, 'storeFolder'])->name('folders.shares.store');
     Route::get('shared', [ShareLinkController::class, 'index'])->name('shared.index');
     Route::patch('shares/{share}/revoke', [ShareLinkController::class, 'revoke'])->name('shares.revoke');
     Route::get('deleted', [DeletedController::class, 'index'])->name('deleted.index');

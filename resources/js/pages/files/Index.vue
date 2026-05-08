@@ -63,7 +63,9 @@ type RenameTarget =
 type TrashTarget =
     | { kind: 'file'; item: FileItem }
     | { kind: 'folder'; item: FolderItem };
-type ShareTarget = FileItem;
+type ShareTarget =
+    | { kind: 'file'; item: FileItem }
+    | { kind: 'folder'; item: FolderItem };
 type AccessTarget =
     | { kind: 'file'; item: FileItem }
     | { kind: 'folder'; item: FolderItem };
@@ -441,8 +443,8 @@ function submitAccess() {
     );
 }
 
-function createShare(file: FileItem) {
-    shareTarget.value = file;
+function createShare(target: ShareTarget) {
+    shareTarget.value = target;
     shareForm.expires_days = props.settings.shareExpiryDays ?? 7;
     shareForm.mode = 'download';
     shareForm.clearErrors();
@@ -458,7 +460,12 @@ function submitShare() {
         return;
     }
 
-    shareForm.post(`/files/${shareTarget.value.id}/shares`, {
+    const url =
+        shareTarget.value.kind === 'file'
+            ? `/files/${shareTarget.value.item.id}/shares`
+            : `/folders/${shareTarget.value.item.id}/shares`;
+
+    shareForm.post(url, {
         only: ['flash'],
         preserveScroll: true,
         onSuccess: closeShareDialog,
@@ -1071,41 +1078,61 @@ watch(
                         >
                             <Folder class="h-5 w-5" />
                         </span>
-                        <DropdownMenu v-if="folder.can_manage">
-                            <DropdownMenuTrigger as-child>
-                                <button
-                                    type="button"
-                                    class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
-                                    aria-label="Folder actions"
-                                >
-                                    <MoreHorizontal class="h-4 w-4" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" class="w-44">
-                                <DropdownMenuItem @select="renameFolder(folder)">
-                                    <Pencil class="h-4 w-4" />
-                                    Rename
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    @select="
-                                        manageAccess({
-                                            kind: 'folder',
-                                            item: folder,
-                                        })
-                                    "
-                                >
-                                    <Users class="h-4 w-4" />
-                                    Access
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    variant="destructive"
-                                    @select="trashFolder(folder)"
-                                >
-                                    <Trash2 class="h-4 w-4" />
-                                    Move to trash
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <div
+                            v-if="folder.can_manage"
+                            class="flex items-center gap-1"
+                        >
+                            <button
+                                type="button"
+                                class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                                title="Share"
+                                @click="
+                                    createShare({
+                                        kind: 'folder',
+                                        item: folder,
+                                    })
+                                "
+                            >
+                                <Share2 class="h-4 w-4" />
+                            </button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger as-child>
+                                    <button
+                                        type="button"
+                                        class="rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10"
+                                        aria-label="Folder actions"
+                                    >
+                                        <MoreHorizontal class="h-4 w-4" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" class="w-44">
+                                    <DropdownMenuItem
+                                        @select="renameFolder(folder)"
+                                    >
+                                        <Pencil class="h-4 w-4" />
+                                        Rename
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        @select="
+                                            manageAccess({
+                                                kind: 'folder',
+                                                item: folder,
+                                            })
+                                        "
+                                    >
+                                        <Users class="h-4 w-4" />
+                                        Access
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        class="text-red-600 focus:text-red-600"
+                                        @select="trashFolder(folder)"
+                                    >
+                                        <Trash2 class="h-4 w-4" />
+                                        Move to trash
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
                     </div>
                     <Link
                         :href="`/files?folder=${folder.id}`"
@@ -1141,7 +1168,7 @@ watch(
                                 type="button"
                                 class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                                 title="Share"
-                                @click="createShare(file)"
+                                @click="createShare({ kind: 'file', item: file })"
                             >
                                 <Share2 class="h-4 w-4" />
                             </button>
@@ -1204,7 +1231,7 @@ watch(
                 <div
                     v-for="folder in folderItems"
                     :key="folder.id"
-                    class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center"
+                    class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-center"
                 >
                     <Link
                         :href="`/files?folder=${folder.id}`"
@@ -1227,6 +1254,20 @@ watch(
                         </span>
                     </Link>
                     <StatusBadge :value="folder.visibility" />
+                    <button
+                        v-if="folder.can_manage"
+                        type="button"
+                        class="justify-self-start rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10 md:justify-self-end"
+                        title="Share"
+                        @click="
+                            createShare({
+                                kind: 'folder',
+                                item: folder,
+                            })
+                        "
+                    >
+                        <Share2 class="h-4 w-4" />
+                    </button>
                     <DropdownMenu v-if="folder.can_manage">
                         <DropdownMenuTrigger as-child>
                             <button
@@ -1299,7 +1340,7 @@ watch(
                             type="button"
                             class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                             title="Share"
-                            @click="createShare(file)"
+                            @click="createShare({ kind: 'file', item: file })"
                         >
                             <Share2 class="h-4 w-4" />
                         </button>
@@ -1614,7 +1655,11 @@ watch(
                     <DialogHeader>
                         <DialogTitle>Create share link</DialogTitle>
                         <DialogDescription>
-                            {{ shareTarget?.display_name }}
+                            {{
+                                shareTarget?.kind === 'file'
+                                    ? shareTarget.item.display_name
+                                    : shareTarget?.item.name
+                            }}
                         </DialogDescription>
                     </DialogHeader>
                     <div class="grid gap-3 sm:grid-cols-3">
@@ -1660,11 +1705,15 @@ watch(
                             <span>
                                 <span
                                     class="block font-semibold text-ink-950 dark:text-white"
-                                    >Download-only</span
+                                    >Download access</span
                                 >
-                                <span class="text-ink-600 dark:text-ink-300"
-                                    >Recipients can download this ready file until the link expires or is revoked.</span
-                                >
+                                <span class="text-ink-600 dark:text-ink-300">
+                                    {{
+                                        shareTarget?.kind === 'folder'
+                                            ? 'Recipients can open this folder view and download ready files until the link expires or is revoked.'
+                                            : 'Recipients can download this ready file until the link expires or is revoked.'
+                                    }}
+                                </span>
                             </span>
                             <StatusBadge value="active" />
                         </div>
