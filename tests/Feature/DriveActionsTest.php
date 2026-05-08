@@ -299,6 +299,93 @@ it('cancels an active uploading record and moves its pending file to trash', fun
         ->and($file->fresh()->is_deleted)->toBeTrue();
 });
 
+it('completes an upload only after the stored object metadata matches policy', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'ready.txt',
+        'display_name' => 'ready.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $upload = Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Initiated,
+        'storage_key' => 'objects/ready.txt',
+        'content_type' => 'text/plain',
+        'size_bytes' => 12,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('objectMetadata')
+        ->once()
+        ->with('objects/ready.txt')
+        ->andReturn(['contentLength' => 12, 'contentType' => 'text/plain', 'etag' => '"ready"']);
+    $storage->shouldReceive('bucket')
+        ->once()
+        ->andReturn('test-bucket');
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/complete-upload")
+        ->assertOk();
+
+    $version = FileVersion::query()->where('file_id', $file->id)->sole();
+
+    expect($upload->fresh()->upload_status)->toBe(UploadStatus::Completed)
+        ->and($file->fresh()->status)->toBe(FileStatus::Ready)
+        ->and($file->fresh()->size_bytes)->toBe(12)
+        ->and($file->fresh()->current_version_id)->toBe($version->id)
+        ->and($version->size_bytes)->toBe(12);
+});
+
+it('rejects upload completion when the stored object size differs from the declared upload size', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'oversized.txt',
+        'display_name' => 'oversized.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $upload = Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Initiated,
+        'storage_key' => 'objects/oversized.txt',
+        'content_type' => 'text/plain',
+        'size_bytes' => 12,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('objectMetadata')
+        ->once()
+        ->with('objects/oversized.txt')
+        ->andReturn(['contentLength' => 48, 'contentType' => 'text/plain', 'etag' => '"oversized"']);
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/oversized.txt')
+        ->andReturnNull();
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/complete-upload")
+        ->assertUnprocessable()
+        ->assertJson(['message' => 'Uploaded object did not match the expected upload policy.']);
+
+    expect($upload->fresh()->upload_status)->toBe(UploadStatus::Failed)
+        ->and($file->fresh()->status)->toBe(FileStatus::Failed)
+        ->and($file->fresh()->current_version_id)->toBeNull()
+        ->and(FileVersion::query()->where('file_id', $file->id)->exists())->toBeFalse();
+});
+
 it('blocks sharing files that are not ready for download', function (): void {
     $owner = User::factory()->create();
     $file = DriveFile::query()->create([

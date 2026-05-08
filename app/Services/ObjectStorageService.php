@@ -107,12 +107,22 @@ class ObjectStorageService
 
     public function objectExists(string $storageKey): bool
     {
-        try {
-            $this->client()->headObject(['Bucket' => $this->bucket(), 'Key' => $storageKey]);
+        return $this->objectMetadata($storageKey) !== null;
+    }
 
-            return true;
+    /** @return array{contentLength:int, contentType:?string, etag:?string}|null */
+    public function objectMetadata(string $storageKey): ?array
+    {
+        try {
+            $result = $this->client()->headObject(['Bucket' => $this->bucket(), 'Key' => $storageKey]);
+
+            return [
+                'contentLength' => (int) $result->get('ContentLength'),
+                'contentType' => $result->get('ContentType') ? (string) $result->get('ContentType') : null,
+                'etag' => $result->get('ETag') ? (string) $result->get('ETag') : null,
+            ];
         } catch (\Throwable) {
-            return false;
+            return null;
         }
     }
 

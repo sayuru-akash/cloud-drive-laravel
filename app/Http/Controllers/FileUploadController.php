@@ -103,7 +103,7 @@ class FileUploadController extends Controller
         ]);
     }
 
-    public function complete(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AuditLogger $audit): JsonResponse
+    public function complete(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AppSettingsService $settings, AuditLogger $audit): JsonResponse
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
         $data = $request->validate([
@@ -118,21 +118,29 @@ class FileUploadController extends Controller
             $storage->completeMultipartUpload($upload->storage_key, $upload->provider_upload_id, $data['parts']);
         }
 
-        if (! $storage->objectExists($upload->storage_key)) {
-            $upload->update(['upload_status' => UploadStatus::Failed]);
-            $file->update(['status' => FileStatus::Failed]);
+        $metadata = $storage->objectMetadata($upload->storage_key);
 
-            return response()->json(['message' => 'Uploaded object was not found.'], 400);
+        if (! $metadata) {
+            return $this->failCompletion($file, $upload, 'Uploaded object was not found.', 400);
         }
 
-        DB::transaction(function () use ($request, $file, $upload, $storage): void {
+        $actualSizeBytes = $metadata['contentLength'];
+        $maxUploadSizeBytes = $settings->values()['maxUploadSizeBytes'];
+
+        if ($actualSizeBytes !== $upload->size_bytes || $actualSizeBytes > $maxUploadSizeBytes) {
+            rescue(fn () => $storage->deleteObject($upload->storage_key), report: false);
+
+            return $this->failCompletion($file, $upload, 'Uploaded object did not match the expected upload policy.', 422);
+        }
+
+        DB::transaction(function () use ($request, $file, $upload, $storage, $metadata): void {
             $version = FileVersion::query()->create([
                 'file_id' => $file->id,
                 'version_number' => 1,
                 'storage_bucket' => $storage->bucket(),
                 'storage_key' => $upload->storage_key,
-                'size_bytes' => $upload->size_bytes,
-                'mime_type' => $upload->content_type,
+                'size_bytes' => $metadata['contentLength'],
+                'mime_type' => $metadata['contentType'] ?? $upload->content_type,
                 'uploaded_by_user_id' => $request->user()->id,
                 'created_at' => now(),
             ]);
@@ -140,8 +148,8 @@ class FileUploadController extends Controller
             $file->update([
                 'status' => FileStatus::Ready,
                 'current_version_id' => $version->id,
-                'size_bytes' => $upload->size_bytes,
-                'mime_type' => $upload->content_type,
+                'size_bytes' => $metadata['contentLength'],
+                'mime_type' => $metadata['contentType'] ?? $upload->content_type,
             ]);
             $upload->update(['upload_status' => UploadStatus::Completed, 'completed_at' => now()]);
         });
@@ -149,6 +157,14 @@ class FileUploadController extends Controller
         $audit->log('file.upload.completed', 'file', $file->id, ['sizeBytes' => $upload->size_bytes], $request);
 
         return response()->json(['ok' => true]);
+    }
+
+    private function failCompletion(DriveFile $file, Upload $upload, string $message, int $status): JsonResponse
+    {
+        $upload->update(['upload_status' => UploadStatus::Failed]);
+        $file->update(['status' => FileStatus::Failed]);
+
+        return response()->json(['message' => $message], $status);
     }
 
     public function cancel(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AuditLogger $audit): JsonResponse
