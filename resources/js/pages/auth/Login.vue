@@ -35,10 +35,7 @@ defineProps<{
         <p>Codezela Technologies employees with login access only.</p>
     </div>
 
-    <div
-        v-if="status"
-        class="text-center text-sm font-medium text-green-600"
-    >
+    <div v-if="status" class="text-center text-sm font-medium text-green-600">
         {{ status }}
     </div>
 

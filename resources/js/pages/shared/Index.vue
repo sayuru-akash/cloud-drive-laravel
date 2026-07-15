@@ -37,7 +37,11 @@ type ShareItem = {
     expires_at: string | null;
     created_at: string;
     creator?: { name: string | null; email: string | null } | null;
-    file?: { display_name: string; size_bytes: number; mime_type: string } | null;
+    file?: {
+        display_name: string;
+        size_bytes: number;
+        mime_type: string;
+    } | null;
     folder?: { name: string; updated_at: string } | null;
 };
 
@@ -92,7 +96,7 @@ async function copyShareUrl() {
 }
 
 async function copyStoredShareUrl(share: ShareItem) {
-    if (! share.public_url) {
+    if (!share.public_url) {
         return;
     }
 
@@ -140,7 +144,6 @@ function confirmRevoke() {
         },
     );
 }
-
 </script>
 
 <template>
@@ -249,9 +252,7 @@ function confirmRevoke() {
                             {{ shareName(share) }}
                         </p>
                     </div>
-                    <p
-                        class="mt-1 text-xs text-ink-600 dark:text-ink-300"
-                    >
+                    <p class="mt-1 text-xs text-ink-600 dark:text-ink-300">
                         {{ shareTypeLabel(share) }}
                         · Created {{ formatDate(share.created_at) }} · Expires
                         {{ formatDate(share.expires_at) }}
@@ -306,8 +307,8 @@ function confirmRevoke() {
                         }}
                     </button>
                     <span
-                        v-if="! share.public_url"
-                        class="text-sm text-ink-500 dark:text-ink-400"
+                        v-if="!share.public_url"
+                        class="dark:text-ink-400 text-sm text-ink-500"
                     >
                         {{
                             share.status === 'active'

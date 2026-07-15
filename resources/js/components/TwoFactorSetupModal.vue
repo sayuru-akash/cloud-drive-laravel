@@ -247,7 +247,9 @@ watch(
                                         @click="copySetupKey"
                                     >
                                         <Check
-                                            v-if="copySetupKeyStatus === 'copied'"
+                                            v-if="
+                                                copySetupKeyStatus === 'copied'
+                                            "
                                             class="w-4 text-green-500"
                                         />
                                         <XCircle

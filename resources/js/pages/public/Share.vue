@@ -60,7 +60,11 @@ const unavailableMessage = computed(() => {
 
 const currentTitle = computed(() => {
     if (props.resourceType === 'folder') {
-        return props.breadcrumbs.at(-1)?.name ?? props.folder?.name ?? 'Shared folder';
+        return (
+            props.breadcrumbs.at(-1)?.name ??
+            props.folder?.name ??
+            'Shared folder'
+        );
     }
 
     return props.file?.display_name ?? 'Shared file';
@@ -90,11 +94,9 @@ function fileDownloadUrl(fileId: string) {
         path="/"
     />
     <main class="flex min-h-screen flex-col bg-background px-4 py-8">
-        <section
-            class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6"
-        >
+        <section class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6">
             <div
-                class="flex flex-col gap-4 rounded-[1.75rem] border border-line bg-white/85 p-5 shadow-soft backdrop-blur dark:bg-white/10 md:flex-row md:items-center md:justify-between"
+                class="shadow-soft flex flex-col gap-4 rounded-[1.75rem] border border-line bg-white/85 p-5 backdrop-blur md:flex-row md:items-center md:justify-between dark:bg-white/10"
             >
                 <div class="flex min-w-0 items-center gap-4">
                     <div
@@ -106,7 +108,9 @@ function fileDownloadUrl(fileId: string) {
                         <p class="text-sm font-medium text-brand">
                             Cloud Drive share
                         </p>
-                        <h1 class="truncate text-2xl font-semibold tracking-tight text-ink-950 dark:text-white">
+                        <h1
+                            class="truncate text-2xl font-semibold tracking-tight text-ink-950 dark:text-white"
+                        >
                             {{ available ? currentTitle : 'Link unavailable' }}
                         </h1>
                         <p
@@ -279,7 +283,7 @@ function fileDownloadUrl(fileId: string) {
                             {{ formatBytes(sharedFile.size_bytes) }}
                         </span>
                         <a
-                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10 md:justify-self-end"
+                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 md:justify-self-end dark:hover:bg-white/10"
                             title="Download"
                             :href="fileDownloadUrl(sharedFile.id)"
                         >
@@ -296,7 +300,10 @@ function fileDownloadUrl(fileId: string) {
                 </div>
             </section>
 
-            <section v-else class="cloud-panel mx-auto w-full max-w-xl p-8 text-center">
+            <section
+                v-else
+                class="cloud-panel mx-auto w-full max-w-xl p-8 text-center"
+            >
                 <h2 class="text-3xl font-semibold tracking-tight">
                     Link unavailable
                 </h2>

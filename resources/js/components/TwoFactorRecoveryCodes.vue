@@ -46,7 +46,9 @@ const copyRecoveryCodes = async (): Promise<void> => {
         return;
     }
 
-    const copied = await copyTextToClipboard(recoveryCodesList.value.join('\n'));
+    const copied = await copyTextToClipboard(
+        recoveryCodesList.value.join('\n'),
+    );
     copyStatus.value = copied ? 'copied' : 'blocked';
 
     window.setTimeout(() => {
@@ -67,7 +69,9 @@ const copyRecoveryCodes = async (): Promise<void> => {
             </CardDescription>
         </CardHeader>
         <CardContent>
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div
+                class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
                 <Button @click="toggleRecoveryCodesVisibility" class="w-fit">
                     <component
                         :is="isRecoveryCodesVisible ? EyeOff : Eye"

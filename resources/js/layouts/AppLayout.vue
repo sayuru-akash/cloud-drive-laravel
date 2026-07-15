@@ -10,20 +10,26 @@ import {
     Shield,
     Trash2,
 } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import UploadProgressPanel from '@/components/cloud/UploadProgressPanel.vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
+import { useUploadManager } from '@/composables/useUploadManager';
 import type { User } from '@/types';
 
 const page = usePage();
-const user = computed(
-    () => page.props.auth?.user as User | null,
-);
+const user = computed(() => page.props.auth?.user as User | null);
 const canManageAdmin = computed(() =>
     ['admin', 'super_admin'].includes(user.value?.role ?? ''),
 );
 const currentPath = computed(() => page.url.split('?')[0]);
+const {
+    hasInProgress: hasActiveUploads,
+    setExpanded: setUploadsExpanded,
+    bindUploadUnloadGuard,
+} = useUploadManager();
+let removeUploadUnloadGuard: (() => void) | null = null;
 
 const navItems = computed(() =>
     [
@@ -38,8 +44,22 @@ const navItems = computed(() =>
 );
 
 function signOut() {
+    if (hasActiveUploads.value) {
+        setUploadsExpanded(true);
+
+        return;
+    }
+
     router.post('/logout');
 }
+
+onMounted(() => {
+    removeUploadUnloadGuard = bindUploadUnloadGuard();
+});
+
+onBeforeUnmount(() => {
+    removeUploadUnloadGuard?.();
+});
 </script>
 
 <template>
@@ -73,8 +93,18 @@ function signOut() {
                         <ThemeToggle />
                         <button
                             class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
-                            title="Sign out"
+                            :class="
+                                hasActiveUploads
+                                    ? 'cursor-not-allowed opacity-50'
+                                    : ''
+                            "
+                            :title="
+                                hasActiveUploads
+                                    ? 'Finish or cancel uploads before signing out'
+                                    : 'Sign out'
+                            "
                             aria-label="Sign out"
+                            :disabled="hasActiveUploads"
                             @click="signOut"
                         >
                             <LogOut class="h-4 w-4" />
@@ -169,6 +199,17 @@ function signOut() {
                     </p>
                     <button
                         class="cloud-button mt-4 w-full bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                        :class="
+                            hasActiveUploads
+                                ? 'cursor-not-allowed opacity-50'
+                                : ''
+                        "
+                        :disabled="hasActiveUploads"
+                        :title="
+                            hasActiveUploads
+                                ? 'Finish or cancel uploads before signing out'
+                                : 'Sign out'
+                        "
                         @click="signOut"
                     >
                         <LogOut class="h-4 w-4" />
@@ -184,5 +225,6 @@ function signOut() {
                 <BrandFooter class="mt-10 pb-2" />
             </main>
         </div>
+        <UploadProgressPanel />
     </div>
 </template>

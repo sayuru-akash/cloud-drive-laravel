@@ -12,8 +12,7 @@ const classes: Record<string, string> = {
         'bg-amber-50 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200',
     initiated:
         'bg-amber-50 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200',
-    uploading:
-        'bg-sky-50 text-sky-800 dark:bg-sky-400/15 dark:text-sky-200',
+    uploading: 'bg-sky-50 text-sky-800 dark:bg-sky-400/15 dark:text-sky-200',
     completed:
         'bg-emerald-50 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200',
     failed: 'bg-red-50 text-red-700 dark:bg-red-400/15 dark:text-red-200',

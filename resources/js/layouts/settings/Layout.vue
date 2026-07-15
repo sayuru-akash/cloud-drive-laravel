@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
+import { HardDrive, ShieldCheck, UserRound } from 'lucide-vue-next';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -7,16 +8,24 @@ import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { toUrl } from '@/lib/utils';
 import { edit as editProfile } from '@/routes/profile';
 import { edit as editSecurity } from '@/routes/security';
+import { index as usageIndex } from '@/routes/usage';
 import type { NavItem } from '@/types';
 
 const sidebarNavItems: NavItem[] = [
     {
         title: 'Profile',
         href: editProfile(),
+        icon: UserRound,
     },
     {
         title: 'Security',
         href: editSecurity(),
+        icon: ShieldCheck,
+    },
+    {
+        title: 'Usage',
+        href: usageIndex(),
+        icon: HardDrive,
     },
 ];
 
@@ -56,8 +65,8 @@ const { isCurrentOrParentUrl } = useCurrentUrl();
 
             <Separator class="my-6 lg:hidden" />
 
-            <div class="flex-1 md:max-w-2xl">
-                <section class="max-w-xl space-y-12">
+            <div class="min-w-0 flex-1 md:max-w-3xl">
+                <section class="space-y-12">
                     <slot />
                 </section>
             </div>

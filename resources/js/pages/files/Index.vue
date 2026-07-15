@@ -37,6 +37,10 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+    uploadsChangedEvent,
+    useUploadManager,
+} from '@/composables/useUploadManager';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
@@ -69,23 +73,6 @@ type ShareTarget =
 type AccessTarget =
     | { kind: 'file'; item: FileItem }
     | { kind: 'folder'; item: FolderItem };
-type UploadQueueItem = {
-    id: string;
-    name: string;
-    size: number;
-    uploadedBytes: number;
-    progress: number;
-    status:
-        | 'queued'
-        | 'preparing'
-        | 'uploading'
-        | 'finalizing'
-        | 'done'
-        | 'error';
-    mimeType: string | null;
-    message: string;
-    remoteFileId?: string;
-};
 type Paginated<T> = {
     data: T[];
     links: Array<{ url: string | null; label: string; active: boolean }>;
@@ -112,7 +99,6 @@ const props = defineProps<{
 }>();
 
 const view = ref(localStorage.getItem('cloud-drive-view') || 'list');
-const uploadQueue = ref<UploadQueueItem[]>([]);
 const dragging = ref(false);
 const createFolderOpen = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -124,8 +110,7 @@ const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
 const accessValue = ref('private');
 const accessProcessing = ref(false);
-const activeUploadRequests = new Map<string, Set<XMLHttpRequest>>();
-const failedUploadQueues = new Set<string>();
+const { queueFiles } = useUploadManager();
 const driveRefreshProps = [
     'files',
     'folders',
@@ -136,6 +121,7 @@ const driveRefreshProps = [
 ];
 let revalidateTimer: number | null = null;
 let filterTimer: number | null = null;
+let uploadRefreshTimer: number | null = null;
 let lastRevalidatedAt = 0;
 const filterValues = ref({
     q: props.filters.q ?? '',
@@ -169,44 +155,6 @@ const activeFilters = computed(
 );
 const folderItems = computed(() => props.folders.data);
 const fileItems = computed(() => props.files.data);
-const unfinishedUploads = computed(() =>
-    uploadQueue.value.filter((item) => item.status !== 'done'),
-);
-const visibleUploads = computed(() => {
-    const active = unfinishedUploads.value.filter(
-        (item) => item.status !== 'queued' && item.status !== 'error',
-    );
-    const errors = unfinishedUploads.value.filter(
-        (item) => item.status === 'error',
-    );
-    const queued = unfinishedUploads.value.filter(
-        (item) => item.status === 'queued',
-    );
-
-    return [...active, ...errors, ...queued].slice(0, 5);
-});
-const uploadSummary = computed(() => {
-    const active = unfinishedUploads.value.filter((item) =>
-        ['preparing', 'uploading', 'finalizing'].includes(item.status),
-    ).length;
-    const queued = unfinishedUploads.value.filter(
-        (item) => item.status === 'queued',
-    ).length;
-    const errors = unfinishedUploads.value.filter(
-        (item) => item.status === 'error',
-    ).length;
-
-    return [
-        active ? `${active} active` : '',
-        queued ? `${queued} queued` : '',
-        errors ? `${errors} failed` : '',
-    ]
-        .filter(Boolean)
-        .join(' · ');
-});
-const hiddenUploadCount = computed(() =>
-    Math.max(0, unfinishedUploads.value.length - visibleUploads.value.length),
-);
 const flash = computed(() => page.props.flash ?? {});
 const renameTitle = computed(
     () => `Rename ${renameTarget.value?.kind === 'folder' ? 'folder' : 'file'}`,
@@ -520,386 +468,25 @@ async function copyShareUrl() {
     }, 4000);
 }
 
-function csrfToken() {
-    return (
-        document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')
-            ?.content ?? ''
-    );
-}
-
-function updateUpload(id: string, patch: Partial<UploadQueueItem>) {
-    const item = uploadQueue.value.find((upload) => upload.id === id);
-
-    if (item) {
-        Object.assign(item, patch);
-    }
-}
-
-async function runPool<T>(
-    items: T[],
-    concurrency: number,
-    worker: (item: T, index: number) => Promise<void>,
-) {
-    let nextIndex = 0;
-    const workers = Array.from(
-        { length: Math.min(concurrency, items.length) },
-        async () => {
-            while (nextIndex < items.length) {
-                const index = nextIndex;
-                nextIndex += 1;
-                await worker(items[index], index);
-            }
-        },
-    );
-
-    await Promise.all(workers);
-}
-
-function uploadBlob(
-    queueId: string,
-    url: string,
-    blob: Blob,
-    contentType: string | null,
-    onProgress: (loaded: number) => void,
-): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        const requests = activeUploadRequests.get(queueId) ?? new Set();
-        requests.add(xhr);
-        activeUploadRequests.set(queueId, requests);
-        xhr.open('PUT', url);
-
-        if (contentType) {
-            xhr.setRequestHeader('Content-Type', contentType);
-        }
-
-        xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-                onProgress(event.loaded);
-            }
-        };
-
-        const removeRequest = () => {
-            requests.delete(xhr);
-
-            if (requests.size === 0) {
-                activeUploadRequests.delete(queueId);
-            }
-        };
-
-        xhr.onload = () => {
-            removeRequest();
-
-            if (xhr.status >= 200 && xhr.status < 300) {
-                const etag = xhr.getResponseHeader('ETag');
-
-                if (!etag) {
-                    reject(
-                        new Error(
-                            'Storage did not return the uploaded part identifier.',
-                        ),
-                    );
-
-                    return;
-                }
-
-                resolve(etag);
-
-                return;
-            }
-
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-        };
-        xhr.onerror = () => {
-            removeRequest();
-            reject(new Error('Upload failed before reaching storage.'));
-        };
-        xhr.onabort = () => {
-            removeRequest();
-            reject(new Error('Upload cancelled.'));
-        };
-        xhr.send(blob);
-    });
-}
-
-function abortUploadRequests(queueId: string) {
-    activeUploadRequests.get(queueId)?.forEach((request) => request.abort());
-    activeUploadRequests.delete(queueId);
-}
-
-function retryDelay(attempt: number) {
-    return new Promise((resolve) =>
-        window.setTimeout(resolve, 750 * 2 ** (attempt - 1)),
-    );
-}
-
-async function responseError(response: Response, fallback: string) {
-    const body = (await response.json().catch(() => null)) as {
-        message?: string;
-    } | null;
-
-    return body?.message || fallback;
-}
-
-async function cancelRemoteUpload(fileId: string) {
-    const response = await fetch(`/api/files/${fileId}/cancel-upload`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-        },
-    });
-
-    return response.ok;
-}
-
-async function completeUpload(fileId: string, body: Record<string, unknown>) {
-    const response = await fetch(`/api/files/${fileId}/complete-upload`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        throw new Error(
-            await responseError(
-                response,
-                'The app could not finalize this upload.',
-            ),
-        );
-    }
-}
-
-async function uploadOne(file: globalThis.File, queueId: string) {
-    updateUpload(queueId, {
-        status: 'preparing',
-        message: 'Preparing signed URL',
-    });
-    const init = await fetch('/api/files/initiate-upload', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-        },
-        body: JSON.stringify({
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            folderId: props.folderId,
-        }),
-    });
-
-    if (!init.ok) {
-        throw new Error(
-            await responseError(init, 'Upload rejected by workspace policy.'),
-        );
-    }
-
-    const payload = await init.json();
-    updateUpload(queueId, { remoteFileId: payload.fileId });
-
-    if (!payload.multipart) {
-        updateUpload(queueId, {
-            status: 'uploading',
-            message: 'Uploading to B2',
-        });
-        await uploadBlob(
-            queueId,
-            payload.uploadUrl,
-            file,
-            file.type || 'application/octet-stream',
-            (loaded) => {
-                updateUpload(queueId, {
-                    uploadedBytes: loaded,
-                    progress: Math.min(
-                        95,
-                        Math.round((loaded / file.size) * 95),
-                    ),
-                });
-            },
-        );
-        updateUpload(queueId, {
-            status: 'finalizing',
-            message: 'Finalizing metadata',
-            progress: 98,
-        });
-        await completeUpload(payload.fileId, {});
-        updateUpload(queueId, {
-            status: 'done',
-            message: 'Done',
-            progress: 100,
-            uploadedBytes: file.size,
-        });
-
-        return;
-    }
-
-    updateUpload(queueId, {
-        status: 'uploading',
-        message: `Uploading ${payload.totalParts} parts in parallel`,
-    });
-    const partProgress = new Map<number, number>();
-    const parts: Array<{ partNumber: number; etag: string }> = [];
-    const partNumbers = Array.from(
-        { length: payload.totalParts },
-        (_, index) => index + 1,
-    );
-    const partConcurrency = Math.max(
-        1,
-        props.settings.parallelPartUploads ?? 4,
-    );
-
-    await runPool(partNumbers, partConcurrency, async (partNumber) => {
-        const start = (partNumber - 1) * payload.chunkSize;
-        const blob = file.slice(
-            start,
-            Math.min(start + payload.chunkSize, file.size),
-        );
-        let etag = '';
-
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-            try {
-                if (failedUploadQueues.has(queueId)) {
-                    throw new Error(
-                        'Upload stopped after another part failed.',
-                    );
-                }
-
-                partProgress.set(partNumber, 0);
-                const partResponse = await fetch(
-                    `/api/files/${payload.fileId}/multipart-part`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': csrfToken(),
-                        },
-                        body: JSON.stringify({ partNumber }),
-                    },
-                );
-
-                if (!partResponse.ok) {
-                    throw new Error(
-                        await responseError(
-                            partResponse,
-                            `Could not sign part ${partNumber}.`,
-                        ),
-                    );
-                }
-
-                const partPayload = await partResponse.json();
-                etag = await uploadBlob(
-                    queueId,
-                    partPayload.uploadUrl,
-                    blob,
-                    null,
-                    (loaded) => {
-                        partProgress.set(partNumber, loaded);
-                        const uploadedBytes = Array.from(
-                            partProgress.values(),
-                        ).reduce((sum, current) => sum + current, 0);
-                        updateUpload(queueId, {
-                            uploadedBytes,
-                            progress: Math.min(
-                                95,
-                                Math.round((uploadedBytes / file.size) * 95),
-                            ),
-                        });
-                    },
-                );
-                updateUpload(queueId, {
-                    message: `Uploading ${payload.totalParts} parts in parallel`,
-                });
-
-                break;
-            } catch (error) {
-                if (attempt === 3 || failedUploadQueues.has(queueId)) {
-                    throw error;
-                }
-
-                updateUpload(queueId, {
-                    message: `Retrying part ${partNumber} (${attempt + 1}/3)`,
-                });
-                await retryDelay(attempt);
-            }
-        }
-
-        parts.push({ partNumber, etag });
-    });
-
-    updateUpload(queueId, {
-        status: 'finalizing',
-        message: 'Combining parts',
-        progress: 98,
-    });
-    await completeUpload(payload.fileId, { parts });
-    updateUpload(queueId, {
-        status: 'done',
-        message: 'Done',
-        progress: 100,
-        uploadedBytes: file.size,
-    });
-}
-
-async function uploadFiles(list: FileList) {
+function uploadFiles(list: FileList) {
     if (!props.canManageCurrentLocation) {
         return;
     }
 
-    const files = Array.from(list);
-    const queued = files.map((file) => {
-        const item: UploadQueueItem = {
-            id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
-            name: file.name,
-            size: file.size,
-            mimeType: file.type || null,
-            uploadedBytes: 0,
-            progress: 0,
-            status: 'queued',
-            message: 'Queued',
-        };
-        uploadQueue.value.push(item);
-
-        return { file, item };
+    queueFiles(Array.from(list), {
+        folderId: props.folderId,
+        maxUploadSizeBytes: props.settings.maxUploadSizeBytes,
+        blockedExtensions: props.settings.blockedExtensions,
+        parallelFileUploads: props.settings.parallelFileUploads,
+        parallelPartUploads: props.settings.parallelPartUploads,
     });
-
-    await runPool(
-        queued,
-        Math.max(1, props.settings.parallelFileUploads ?? 2),
-        async ({ file, item }) => {
-            try {
-                await uploadOne(file, item.id);
-            } catch (error) {
-                failedUploadQueues.add(item.id);
-                abortUploadRequests(item.id);
-                const cleanedUp = item.remoteFileId
-                    ? await cancelRemoteUpload(item.remoteFileId).catch(
-                          () => false,
-                      )
-                    : false;
-                updateUpload(item.id, {
-                    status: 'error',
-                    message:
-                        (error instanceof Error
-                            ? error.message
-                            : 'Upload failed') +
-                        (cleanedUp ? ' Upload session cleaned up.' : ''),
-                });
-            }
-        },
-    );
-
-    router.reload({ only: driveRefreshProps });
 }
 
 function handleDrop(event: DragEvent) {
     dragging.value = false;
 
     if (props.canManageCurrentLocation && event.dataTransfer?.files) {
-        void uploadFiles(event.dataTransfer.files);
+        uploadFiles(event.dataTransfer.files);
     }
 }
 
@@ -907,9 +494,17 @@ function handleInput(event: Event) {
     const input = event.target as HTMLInputElement | null;
 
     if (input?.files) {
-        void uploadFiles(input.files);
+        uploadFiles(input.files);
         input.value = '';
     }
+}
+
+function refreshAfterUploadChange() {
+    if (uploadRefreshTimer !== null) {
+        window.clearTimeout(uploadRefreshTimer);
+    }
+
+    uploadRefreshTimer = window.setTimeout(() => revalidateDrive(true), 600);
 }
 
 function revalidateDrive(force = false) {
@@ -936,6 +531,7 @@ function revalidateOnFocus() {
 onMounted(() => {
     revalidateTimer = window.setTimeout(() => revalidateDrive(true), 350);
     window.addEventListener('focus', revalidateOnFocus);
+    window.addEventListener(uploadsChangedEvent, refreshAfterUploadChange);
     document.addEventListener('visibilitychange', revalidateWhenVisible);
 });
 
@@ -948,7 +544,12 @@ onBeforeUnmount(() => {
         window.clearTimeout(filterTimer);
     }
 
+    if (uploadRefreshTimer !== null) {
+        window.clearTimeout(uploadRefreshTimer);
+    }
+
     window.removeEventListener('focus', revalidateOnFocus);
+    window.removeEventListener(uploadsChangedEvent, refreshAfterUploadChange);
     document.removeEventListener('visibilitychange', revalidateWhenVisible);
 });
 
@@ -1908,77 +1509,5 @@ watch(
                 </form>
             </DialogContent>
         </Dialog>
-
-        <div
-            v-if="visibleUploads.length > 0"
-            class="fixed right-4 bottom-4 w-[min(24rem,calc(100vw-2rem))] rounded-[1.5rem] border border-line bg-white/92 p-4 text-sm shadow-2xl backdrop-blur dark:bg-ink-900/92"
-        >
-            <div class="flex items-center justify-between">
-                <p class="font-semibold text-ink-950 dark:text-white">
-                    Uploads
-                </p>
-                <span class="text-xs text-ink-600 dark:text-ink-300">
-                    {{ uploadSummary }}
-                </span>
-            </div>
-            <div class="mt-3 space-y-3">
-                <div
-                    v-for="upload in visibleUploads"
-                    :key="upload.id"
-                    class="rounded-[1.1rem] border border-line bg-white/70 p-3 dark:bg-white/10"
-                >
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="flex min-w-0 items-center gap-3">
-                            <FileTypeIcon
-                                :name="upload.name"
-                                :mime-type="upload.mimeType"
-                            />
-                            <div class="min-w-0">
-                                <p
-                                    class="truncate font-medium text-ink-950 dark:text-white"
-                                >
-                                    {{ upload.name }}
-                                </p>
-                                <p
-                                    class="mt-0.5 truncate text-xs text-ink-600 dark:text-ink-300"
-                                >
-                                    {{
-                                        formatFileType(
-                                            upload.name,
-                                            upload.mimeType,
-                                        )
-                                    }}
-                                    · {{ upload.message }} ·
-                                    {{ formatBytes(upload.uploadedBytes) }} /
-                                    {{ formatBytes(upload.size) }}
-                                </p>
-                            </div>
-                        </div>
-                        <span class="text-xs font-semibold text-brand"
-                            >{{ upload.progress }}%</span
-                        >
-                    </div>
-                    <div
-                        class="mt-3 h-2 overflow-hidden rounded-full bg-ink-950/10 dark:bg-white/10"
-                    >
-                        <div
-                            class="h-full rounded-full transition-all duration-200"
-                            :class="
-                                upload.status === 'error'
-                                    ? 'bg-red-500'
-                                    : 'bg-brand'
-                            "
-                            :style="{ width: `${upload.progress}%` }"
-                        />
-                    </div>
-                </div>
-            </div>
-            <p
-                v-if="hiddenUploadCount > 0"
-                class="mt-3 text-xs text-ink-600 dark:text-ink-300"
-            >
-                +{{ hiddenUploadCount }} more in this batch
-            </p>
-        </div>
     </main>
 </template>

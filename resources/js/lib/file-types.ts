@@ -77,7 +77,7 @@ const extensionKinds: Record<string, FileTypeKind> = {
 };
 
 function extensionFromName(name?: string | null): string {
-    if (! name || ! name.includes('.')) {
+    if (!name || !name.includes('.')) {
         return '';
     }
 
@@ -85,7 +85,7 @@ function extensionFromName(name?: string | null): string {
 }
 
 function labelFromMimeType(mimeType?: string | null): string {
-    if (! mimeType) {
+    if (!mimeType) {
         return '';
     }
 
@@ -96,7 +96,7 @@ function labelFromMimeType(mimeType?: string | null): string {
         .replace(/\s+/g, ' ')
         .trim();
 
-    if (! group || ! cleanSubtype) {
+    if (!group || !cleanSubtype) {
         return '';
     }
 
@@ -132,7 +132,10 @@ export function fileTypeKind(
         return 'spreadsheet';
     }
 
-    if (mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) {
+    if (
+        mimeType?.includes('presentation') ||
+        mimeType?.includes('powerpoint')
+    ) {
         return 'presentation';
     }
 

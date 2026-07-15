@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { Form, Head } from '@inertiajs/vue3';
-import { KeyRound, LockKeyhole, ShieldCheck, Smartphone } from 'lucide-vue-next';
+import {
+    KeyRound,
+    LockKeyhole,
+    ShieldCheck,
+    Smartphone,
+} from 'lucide-vue-next';
 import { onUnmounted, ref } from 'vue';
 import SecurityController from '@/actions/App/Http/Controllers/Settings/SecurityController';
 import Heading from '@/components/Heading.vue';
@@ -190,7 +195,10 @@ onUnmounted(() => clearTwoFactorAuthData());
                     <div class="space-y-2">
                         <KeyRound class="size-4 text-brand" />
                         <p class="font-medium text-foreground">Keep backup</p>
-                        <p>Use the setup key if the camera scan is not available.</p>
+                        <p>
+                            Use the setup key if the camera scan is not
+                            available.
+                        </p>
                     </div>
                     <div class="space-y-2">
                         <LockKeyhole class="size-4 text-brand" />
@@ -227,7 +235,9 @@ onUnmounted(() => clearTwoFactorAuthData());
                     <TwoFactorRecoveryCodes />
 
                     <div class="rounded-xl border border-destructive/30 p-4">
-                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div
+                            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                        >
                             <div>
                                 <h3 class="font-medium">Disable 2FA</h3>
                                 <p class="mt-1 text-sm text-muted-foreground">

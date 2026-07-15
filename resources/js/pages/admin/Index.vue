@@ -74,7 +74,9 @@ const uploadLimitLabel = computed(() =>
 
 const createDialogOpen = ref(false);
 const generatedPassword = ref('');
-const userEdits = reactive<Record<number, { role: UserRole; is_active: boolean }>>({});
+const userEdits = reactive<
+    Record<number, { role: UserRole; is_active: boolean }>
+>({});
 const usersRefreshProps = ['users', 'flash'];
 
 const createUserForm = useForm({
@@ -86,7 +88,11 @@ const createUserForm = useForm({
     password_confirmation: '',
 });
 
-const roleOptions: Array<{ value: UserRole; label: string; description: string }> = [
+const roleOptions: Array<{
+    value: UserRole;
+    label: string;
+    description: string;
+}> = [
     {
         value: 'member',
         label: 'Member',
@@ -95,7 +101,8 @@ const roleOptions: Array<{ value: UserRole; label: string; description: string }
     {
         value: 'admin',
         label: 'Admin',
-        description: 'Can manage users, trash cleanup, settings, and audit logs.',
+        description:
+            'Can manage users, trash cleanup, settings, and audit logs.',
     },
 ];
 
@@ -153,7 +160,9 @@ function resetUserEdit(user: UserRow): void {
 function userHasChanges(user: UserRow): boolean {
     const edit = userEdits[user.id];
 
-    return Boolean(edit && (edit.role !== user.role || edit.is_active !== user.is_active));
+    return Boolean(
+        edit && (edit.role !== user.role || edit.is_active !== user.is_active),
+    );
 }
 
 function isSuperAdminLocked(user: UserRow): boolean {
@@ -221,11 +230,14 @@ function roleLabel(role: UserRole): string {
                     class="flex flex-col gap-3 border-b border-line p-5 sm:flex-row sm:items-start sm:justify-between"
                 >
                     <div>
-                        <h2 class="text-lg font-semibold text-ink-950 dark:text-white">
+                        <h2
+                            class="text-lg font-semibold text-ink-950 dark:text-white"
+                        >
                             Workspace policy
                         </h2>
                         <p class="mt-1 text-sm text-ink-600 dark:text-ink-300">
-                            Upload limits, link expiry, trash retention, and blocked file types.
+                            Upload limits, link expiry, trash retention, and
+                            blocked file types.
                         </p>
                     </div>
                     <Badge variant="secondary" class="w-fit rounded-full">
@@ -247,10 +259,14 @@ function roleLabel(role: UserRole): string {
                             min="1"
                             class="mt-3 w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
                         />
-                        <span class="mt-2 block text-xs text-ink-600 dark:text-ink-300">
+                        <span
+                            class="mt-2 block text-xs text-ink-600 dark:text-ink-300"
+                        >
                             Current limit: {{ uploadLimitLabel }}
                         </span>
-                        <InputError :message="settingsForm.errors.max_upload_size_bytes" />
+                        <InputError
+                            :message="settingsForm.errors.max_upload_size_bytes"
+                        />
                     </label>
 
                     <div class="grid gap-4 sm:grid-cols-2">
@@ -269,11 +285,15 @@ function roleLabel(role: UserRole): string {
                                     max="365"
                                     class="min-w-0 flex-1 rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
                                 />
-                                <span class="text-sm text-ink-600 dark:text-ink-300">
+                                <span
+                                    class="text-sm text-ink-600 dark:text-ink-300"
+                                >
                                     days
                                 </span>
                             </div>
-                            <InputError :message="settingsForm.errors.retention_days" />
+                            <InputError
+                                :message="settingsForm.errors.retention_days"
+                            />
                         </label>
 
                         <label
@@ -285,17 +305,23 @@ function roleLabel(role: UserRole): string {
                             </span>
                             <div class="mt-3 flex items-center gap-2">
                                 <input
-                                    v-model.number="settingsForm.share_expiry_days"
+                                    v-model.number="
+                                        settingsForm.share_expiry_days
+                                    "
                                     type="number"
                                     min="1"
                                     max="90"
                                     class="min-w-0 flex-1 rounded-xl border border-line bg-white px-4 py-2.5 text-sm dark:bg-white/10"
                                 />
-                                <span class="text-sm text-ink-600 dark:text-ink-300">
+                                <span
+                                    class="text-sm text-ink-600 dark:text-ink-300"
+                                >
                                     days
                                 </span>
                             </div>
-                            <InputError :message="settingsForm.errors.share_expiry_days" />
+                            <InputError
+                                :message="settingsForm.errors.share_expiry_days"
+                            />
                         </label>
                     </div>
 
@@ -312,10 +338,14 @@ function roleLabel(role: UserRole): string {
                             class="mt-3 w-full resize-none rounded-xl border border-line bg-white px-4 py-3 font-mono text-sm leading-6 dark:bg-white/10"
                             placeholder="exe, bat, cmd, sh"
                         />
-                        <span class="mt-2 block text-xs text-ink-600 dark:text-ink-300">
+                        <span
+                            class="mt-2 block text-xs text-ink-600 dark:text-ink-300"
+                        >
                             Comma-separated extensions without dots.
                         </span>
-                        <InputError :message="settingsForm.errors.blocked_extensions" />
+                        <InputError
+                            :message="settingsForm.errors.blocked_extensions"
+                        />
                     </label>
                 </div>
 
@@ -367,9 +397,13 @@ function roleLabel(role: UserRole): string {
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
                             <p class="truncate font-medium">{{ user.name }}</p>
-                            <Badge variant="secondary">{{ roleLabel(user.role) }}</Badge>
+                            <Badge variant="secondary">{{
+                                roleLabel(user.role)
+                            }}</Badge>
                             <Badge
-                                :variant="user.is_active ? 'default' : 'outline'"
+                                :variant="
+                                    user.is_active ? 'default' : 'outline'
+                                "
                             >
                                 {{ user.is_active ? 'Active' : 'Inactive' }}
                             </Badge>
@@ -387,7 +421,9 @@ function roleLabel(role: UserRole): string {
                                 }}
                             </Badge>
                         </div>
-                        <p class="mt-1 truncate text-sm text-ink-600 dark:text-ink-300">
+                        <p
+                            class="mt-1 truncate text-sm text-ink-600 dark:text-ink-300"
+                        >
                             {{ user.email }}
                         </p>
                         <p
@@ -449,7 +485,9 @@ function roleLabel(role: UserRole): string {
                         </div>
                     </div>
 
-                    <div class="flex flex-wrap justify-start gap-2 xl:justify-end">
+                    <div
+                        class="flex flex-wrap justify-start gap-2 xl:justify-end"
+                    >
                         <Badge
                             v-if="isSuperAdminLocked(user)"
                             variant="outline"
@@ -529,7 +567,9 @@ function roleLabel(role: UserRole): string {
                                 autocomplete="email"
                                 required
                             />
-                            <InputError :message="createUserForm.errors.email" />
+                            <InputError
+                                :message="createUserForm.errors.email"
+                            />
                         </div>
                     </div>
 
@@ -552,7 +592,8 @@ function roleLabel(role: UserRole): string {
                             <p class="text-xs leading-5 text-muted-foreground">
                                 {{
                                     roleOptions.find(
-                                        (role) => role.value === createUserForm.role,
+                                        (role) =>
+                                            role.value === createUserForm.role,
                                     )?.description
                                 }}
                             </p>
@@ -570,15 +611,19 @@ function roleLabel(role: UserRole): string {
                                 <option :value="false">Create inactive</option>
                             </select>
                             <p class="text-xs leading-5 text-muted-foreground">
-                                Inactive users cannot sign in until an admin enables
-                                the account.
+                                Inactive users cannot sign in until an admin
+                                enables the account.
                             </p>
-                            <InputError :message="createUserForm.errors.is_active" />
+                            <InputError
+                                :message="createUserForm.errors.is_active"
+                            />
                         </div>
                     </div>
 
                     <div class="rounded-xl border border-line p-4">
-                        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div
+                            class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+                        >
                             <div>
                                 <h3 class="font-medium">Temporary password</h3>
                                 <p class="mt-1 text-sm text-muted-foreground">
@@ -606,7 +651,9 @@ function roleLabel(role: UserRole): string {
                                     autocomplete="new-password"
                                     required
                                 />
-                                <InputError :message="createUserForm.errors.password" />
+                                <InputError
+                                    :message="createUserForm.errors.password"
+                                />
                             </div>
 
                             <div class="grid gap-2">
@@ -615,7 +662,9 @@ function roleLabel(role: UserRole): string {
                                 </Label>
                                 <PasswordInput
                                     id="new-user-password-confirmation"
-                                    v-model="createUserForm.password_confirmation"
+                                    v-model="
+                                        createUserForm.password_confirmation
+                                    "
                                     autocomplete="new-password"
                                     required
                                 />
@@ -629,8 +678,8 @@ function roleLabel(role: UserRole): string {
                             <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
                             <p class="text-sm">
                                 Generated password is filled into both password
-                                fields. It will not be shown again after the user
-                                is created.
+                                fields. It will not be shown again after the
+                                user is created.
                             </p>
                         </div>
                     </div>

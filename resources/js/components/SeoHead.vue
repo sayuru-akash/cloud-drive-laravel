@@ -69,8 +69,16 @@ const robots = 'noindex,nofollow,noarchive';
             property="og:image:secure_url"
             :content="imageUrl"
         />
-        <meta head-key="og:image:width" property="og:image:width" content="1200" />
-        <meta head-key="og:image:height" property="og:image:height" content="630" />
+        <meta
+            head-key="og:image:width"
+            property="og:image:width"
+            content="1200"
+        />
+        <meta
+            head-key="og:image:height"
+            property="og:image:height"
+            content="630"
+        />
         <meta
             head-key="og:image:alt"
             property="og:image:alt"

@@ -12,7 +12,7 @@ function label(value: string): string {
 }
 
 function visit(url: string | null): void {
-    if (! url) {
+    if (!url) {
         return;
     }
 
@@ -24,7 +24,11 @@ function visit(url: string | null): void {
 </script>
 
 <template>
-    <nav v-if="links.length > 3" class="flex flex-wrap gap-2" aria-label="Pagination">
+    <nav
+        v-if="links.length > 3"
+        class="flex flex-wrap gap-2"
+        aria-label="Pagination"
+    >
         <button
             v-for="link in links"
             :key="link.label"

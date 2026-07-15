@@ -26,7 +26,7 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 export function formatStatus(value: string | null | undefined): string {
-    if (! value) {
+    if (!value) {
         return 'Unknown';
     }
 

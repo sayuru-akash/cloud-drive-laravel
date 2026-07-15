@@ -31,7 +31,9 @@ defineProps<{
             description="Trace workspace actions across files, folders, sharing, and admin changes."
         />
         <section class="cloud-panel p-5">
-            <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div
+                class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+            >
                 <input
                     :value="filters.q"
                     class="min-w-0 flex-1 rounded-full border border-line bg-white px-4 py-2 text-sm dark:bg-white/10"

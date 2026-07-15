@@ -85,7 +85,9 @@ const theme = ref<ThemePreference>('system');
 
 export function useTheme(): UseThemeReturn {
     onMounted(() => {
-        const savedTheme = localStorage.getItem('theme') as ThemePreference | null;
+        const savedTheme = localStorage.getItem(
+            'theme',
+        ) as ThemePreference | null;
 
         if (savedTheme) {
             theme.value = savedTheme;

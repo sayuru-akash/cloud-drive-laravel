@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePoll } from '@inertiajs/vue3';
 import {
     FileUp,
     FolderKanban,
@@ -7,10 +7,14 @@ import {
     LoaderCircle,
     Trash2,
 } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import StatusBadge from '@/components/cloud/StatusBadge.vue';
+import {
+    uploadsChangedEvent,
+    useUploadManager,
+} from '@/composables/useUploadManager';
 import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
 
@@ -38,7 +42,27 @@ defineProps<{
 }>();
 
 const cancellingUploadId = ref<string | null>(null);
-const dashboardRefreshProps = ['stats', 'recentUploads'];
+const dashboardRefreshProps = ['stats', 'recentFiles', 'recentUploads'];
+const { uploads: localUploads, cancelUpload: cancelLocalUpload } =
+    useUploadManager();
+const localUploadsByFileId = computed(
+    () =>
+        new Map(
+            localUploads.value
+                .filter((upload) => upload.remoteFileId)
+                .map((upload) => [upload.remoteFileId as string, upload]),
+        ),
+);
+
+usePoll(10_000, { only: dashboardRefreshProps });
+
+function localUploadFor(fileId: string) {
+    return localUploadsByFileId.value.get(fileId);
+}
+
+function refreshDashboardUploads(): void {
+    router.reload({ only: dashboardRefreshProps });
+}
 
 function csrfToken() {
     return (
@@ -52,16 +76,33 @@ async function cancelUpload(upload: {
     file_id: string;
 }): Promise<void> {
     cancellingUploadId.value = upload.id;
+    const localUpload = localUploadFor(upload.file_id);
+
+    if (
+        localUpload &&
+        ['queued', 'preparing', 'uploading'].includes(localUpload.status)
+    ) {
+        cancelLocalUpload(localUpload.id);
+        window.setTimeout(() => {
+            cancellingUploadId.value = null;
+        }, 1000);
+
+        return;
+    }
+
     let refreshQueued = false;
 
     try {
-        const response = await fetch(`/api/files/${upload.file_id}/cancel-upload`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrfToken(),
+        const response = await fetch(
+            `/api/files/${upload.file_id}/cancel-upload`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
             },
-        });
+        );
 
         if (response.ok) {
             refreshQueued = true;
@@ -73,11 +114,19 @@ async function cancelUpload(upload: {
             });
         }
     } finally {
-        if (! refreshQueued) {
+        if (!refreshQueued) {
             cancellingUploadId.value = null;
         }
     }
 }
+
+onMounted(() => {
+    window.addEventListener(uploadsChangedEvent, refreshDashboardUploads);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener(uploadsChangedEvent, refreshDashboardUploads);
+});
 </script>
 
 <template>
@@ -166,18 +215,24 @@ async function cancelUpload(upload: {
                                 :mime-type="file.mime_type"
                             />
                             <div class="min-w-0">
-                            <p
-                                class="truncate text-sm font-medium text-ink-950 dark:text-white"
-                            >
-                                {{ file.display_name }}
-                            </p>
-                            <p
-                                class="mt-1 text-xs text-ink-600 dark:text-ink-300"
-                            >
-                                {{ formatBytes(file.size_bytes) }} ·
-                                {{ formatFileType(file.display_name, file.mime_type) }} ·
-                                {{ formatDate(file.updated_at) }}
-                            </p>
+                                <p
+                                    class="truncate text-sm font-medium text-ink-950 dark:text-white"
+                                >
+                                    {{ file.display_name }}
+                                </p>
+                                <p
+                                    class="mt-1 text-xs text-ink-600 dark:text-ink-300"
+                                >
+                                    {{ formatBytes(file.size_bytes) }} ·
+                                    {{
+                                        formatFileType(
+                                            file.display_name,
+                                            file.mime_type,
+                                        )
+                                    }}
+                                    ·
+                                    {{ formatDate(file.updated_at) }}
+                                </p>
                             </div>
                         </div>
                         <StatusBadge :value="file.visibility" />
@@ -215,34 +270,39 @@ async function cancelUpload(upload: {
                         :key="upload.id"
                         class="min-w-0 rounded-[1.25rem] border border-line bg-white/70 p-4 dark:bg-white/10"
                     >
-                        <div class="flex min-w-0 items-start justify-between gap-3">
+                        <div
+                            class="flex min-w-0 items-start justify-between gap-3"
+                        >
                             <div class="flex min-w-0 items-center gap-3">
                                 <FileTypeIcon
                                     :name="upload.display_name"
                                     :mime-type="upload.mime_type"
                                 />
                                 <div class="min-w-0">
-                                <p
-                                    class="truncate text-sm font-medium text-ink-950 dark:text-white"
-                                >
-                                    {{ upload.display_name }}
-                                </p>
-                                <p
-                                    class="mt-1 truncate text-xs text-ink-600 dark:text-ink-300"
-                                >
-                                    {{ formatBytes(upload.size_bytes) }} ·
-                                    {{
-                                        formatFileType(
-                                            upload.display_name,
-                                            upload.mime_type,
-                                        )
-                                    }} ·
-                                    {{
-                                        upload.completed_at
-                                            ? formatDate(upload.completed_at)
-                                            : formatDate(upload.created_at)
-                                    }}
-                                </p>
+                                    <p
+                                        class="truncate text-sm font-medium text-ink-950 dark:text-white"
+                                    >
+                                        {{ upload.display_name }}
+                                    </p>
+                                    <p
+                                        class="mt-1 truncate text-xs text-ink-600 dark:text-ink-300"
+                                    >
+                                        {{ formatBytes(upload.size_bytes) }} ·
+                                        {{
+                                            formatFileType(
+                                                upload.display_name,
+                                                upload.mime_type,
+                                            )
+                                        }}
+                                        ·
+                                        {{
+                                            upload.completed_at
+                                                ? formatDate(
+                                                      upload.completed_at,
+                                                  )
+                                                : formatDate(upload.created_at)
+                                        }}
+                                    </p>
                                 </div>
                             </div>
                             <div class="flex shrink-0 flex-col items-end gap-2">
@@ -262,6 +322,31 @@ async function cancelUpload(upload: {
                                     Cancel
                                 </button>
                             </div>
+                        </div>
+                        <div v-if="localUploadFor(upload.file_id)" class="mt-3">
+                            <div
+                                class="h-1.5 overflow-hidden rounded-full bg-ink-950/10 dark:bg-white/10"
+                                role="progressbar"
+                                :aria-label="`${upload.display_name} upload progress`"
+                                :aria-valuenow="
+                                    localUploadFor(upload.file_id)?.progress
+                                "
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                            >
+                                <div
+                                    class="h-full rounded-full bg-brand transition-[width] duration-200"
+                                    :style="{
+                                        width: `${localUploadFor(upload.file_id)?.progress ?? 0}%`,
+                                    }"
+                                />
+                            </div>
+                            <p
+                                class="mt-1.5 text-xs text-ink-600 dark:text-ink-300"
+                            >
+                                {{ localUploadFor(upload.file_id)?.message }} ·
+                                {{ localUploadFor(upload.file_id)?.progress }}%
+                            </p>
                         </div>
                     </div>
                     <p

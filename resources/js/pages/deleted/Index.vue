@@ -44,7 +44,7 @@ const deleteTarget = ref<DeleteTarget | null>(null);
 const deleteProcessing = ref(false);
 const deletedRefreshProps = ['files', 'folders', 'flash'];
 const deleteDescription = computed(() => {
-    if (! deleteTarget.value) {
+    if (!deleteTarget.value) {
         return '';
     }
 
@@ -96,7 +96,7 @@ function restoreFolder(folder: DeletedFolder) {
 function confirmHardDelete() {
     const target = deleteTarget.value;
 
-    if (! target) {
+    if (!target) {
         return;
     }
 
@@ -176,8 +176,13 @@ function confirmHardDelete() {
                     <div>
                         <p class="font-medium">{{ file.display_name }}</p>
                         <p class="text-xs text-ink-600 dark:text-ink-300">
-                            {{ formatFileType(file.display_name, file.mime_type) }} ·
-                            Deleted {{ formatDate(file.deleted_at) }}
+                            {{
+                                formatFileType(
+                                    file.display_name,
+                                    file.mime_type,
+                                )
+                            }}
+                            · Deleted {{ formatDate(file.deleted_at) }}
                         </p>
                     </div>
                 </div>
@@ -214,13 +219,17 @@ function confirmHardDelete() {
             class="grid gap-3 md:grid-cols-2"
         >
             <div v-if="folders.links.length > 3" class="cloud-panel p-4">
-                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                <p
+                    class="mb-3 text-sm font-semibold text-ink-950 dark:text-white"
+                >
                     Folders
                 </p>
                 <PaginationLinks :links="folders.links" />
             </div>
             <div v-if="files.links.length > 3" class="cloud-panel p-4">
-                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                <p
+                    class="mb-3 text-sm font-semibold text-ink-950 dark:text-white"
+                >
                     Files
                 </p>
                 <PaginationLinks :links="files.links" />

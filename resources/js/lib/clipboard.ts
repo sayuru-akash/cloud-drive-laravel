@@ -1,5 +1,5 @@
 export async function copyTextToClipboard(text: string): Promise<boolean> {
-    if (! text) {
+    if (!text) {
         return false;
     }
 
