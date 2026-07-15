@@ -6,6 +6,7 @@ import {
     Link2,
     LoaderCircle,
     Trash2,
+    X,
 } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
@@ -191,8 +192,8 @@ onBeforeUnmount(() => {
             </Link>
         </section>
 
-        <section class="grid gap-6 xl:grid-cols-[1.3fr_.7fr]">
-            <div class="cloud-panel p-5">
+        <section class="grid gap-6 xl:grid-cols-2">
+            <div class="cloud-panel min-w-0 p-5">
                 <div class="flex items-center justify-between">
                     <h2
                         class="text-lg font-semibold text-ink-950 dark:text-white"
@@ -264,11 +265,11 @@ onBeforeUnmount(() => {
                         >Files</Link
                     >
                 </div>
-                <div class="mt-4 space-y-2">
+                <div class="mt-4 divide-y divide-line">
                     <div
                         v-for="upload in recentUploads"
                         :key="upload.id"
-                        class="min-w-0 rounded-[1.25rem] border border-line bg-white/70 p-4 dark:bg-white/10"
+                        class="min-w-0 py-4 first:pt-0 last:pb-0"
                     >
                         <div
                             class="flex min-w-0 items-start justify-between gap-3"
@@ -305,21 +306,22 @@ onBeforeUnmount(() => {
                                     </p>
                                 </div>
                             </div>
-                            <div class="flex shrink-0 flex-col items-end gap-2">
+                            <div class="flex shrink-0 items-center gap-1.5">
                                 <StatusBadge :value="upload.upload_status" />
                                 <button
                                     v-if="upload.can_cancel"
                                     type="button"
-                                    class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-500/10"
+                                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-500/10"
                                     :disabled="cancellingUploadId === upload.id"
+                                    :aria-label="`Cancel ${upload.display_name}`"
+                                    title="Cancel upload"
                                     @click="cancelUpload(upload)"
                                 >
                                     <LoaderCircle
                                         v-if="cancellingUploadId === upload.id"
                                         class="h-3.5 w-3.5 animate-spin"
                                     />
-                                    <Trash2 v-else class="h-3.5 w-3.5" />
-                                    Cancel
+                                    <X v-else class="h-4 w-4" />
                                 </button>
                             </div>
                         </div>
