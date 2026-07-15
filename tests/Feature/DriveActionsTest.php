@@ -417,6 +417,145 @@ it('completes an upload only after the stored object metadata matches policy', f
         ->and($version->size_bytes)->toBe(12);
 });
 
+it('normalizes and validates multipart parts before completion', function (): void {
+    config(['drive.multipart_chunk_size_bytes' => 32]);
+
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'multipart.mp4',
+        'display_name' => 'multipart.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 80,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Uploading,
+        'storage_key' => 'objects/multipart.mp4',
+        'provider_upload_id' => 'provider-upload-id',
+        'content_type' => 'video/mp4',
+        'size_bytes' => 80,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('completeMultipartUpload')
+        ->once()
+        ->with('objects/multipart.mp4', 'provider-upload-id', [
+            ['partNumber' => 1, 'etag' => 'etag-1'],
+            ['partNumber' => 2, 'etag' => 'etag-2'],
+            ['partNumber' => 3, 'etag' => 'etag-3'],
+        ]);
+    $storage->shouldReceive('objectMetadata')
+        ->once()
+        ->with('objects/multipart.mp4')
+        ->andReturn(['contentLength' => 80, 'contentType' => 'video/mp4', 'etag' => 'etag-complete']);
+    $storage->shouldReceive('bucket')->once()->andReturn('test-bucket');
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/complete-upload", [
+            'parts' => [
+                ['partNumber' => 3, 'etag' => 'etag-3'],
+                ['partNumber' => 1, 'etag' => 'etag-1'],
+                ['partNumber' => 2, 'etag' => 'etag-2'],
+            ],
+        ])
+        ->assertOk();
+});
+
+it('treats repeated completion of a ready file as successful', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'already-ready.mp4',
+        'display_name' => 'already-ready.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 80,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/already-ready.mp4',
+        'size_bytes' => 80,
+        'mime_type' => 'video/mp4',
+        'uploaded_by_user_id' => $owner->id,
+        'created_at' => now(),
+    ]);
+    $file->update(['current_version_id' => $version->id]);
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/complete-upload", [
+            'parts' => [['partNumber' => 1, 'etag' => 'etag-1']],
+        ])
+        ->assertOk();
+});
+
+it('does not create a duplicate version when another request finishes first', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'racing.mp4',
+        'display_name' => 'racing.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 80,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $upload = Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Uploading,
+        'storage_key' => 'objects/racing.mp4',
+        'content_type' => 'video/mp4',
+        'size_bytes' => 80,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('objectMetadata')
+        ->once()
+        ->with('objects/racing.mp4')
+        ->andReturnUsing(function () use ($file, $owner, $upload): array {
+            $version = FileVersion::query()->create([
+                'file_id' => $file->id,
+                'version_number' => 1,
+                'storage_bucket' => 'test-bucket',
+                'storage_key' => 'objects/racing.mp4',
+                'size_bytes' => 80,
+                'mime_type' => 'video/mp4',
+                'uploaded_by_user_id' => $owner->id,
+                'created_at' => now(),
+            ]);
+            $file->update([
+                'status' => FileStatus::Ready,
+                'current_version_id' => $version->id,
+            ]);
+            $upload->update([
+                'upload_status' => UploadStatus::Completed,
+                'completed_at' => now(),
+            ]);
+
+            return ['contentLength' => 80, 'contentType' => 'video/mp4', 'etag' => 'etag-complete'];
+        });
+    $storage->shouldNotReceive('bucket');
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/complete-upload")
+        ->assertOk();
+
+    expect(FileVersion::query()->where('file_id', $file->id)->count())->toBe(1)
+        ->and(AuditLog::query()->where('action_type', 'file.upload.completed')->count())->toBe(0);
+});
+
 it('rejects upload completion when the stored object size differs from the declared upload size', function (): void {
     $owner = User::factory()->create();
     $file = DriveFile::query()->create([

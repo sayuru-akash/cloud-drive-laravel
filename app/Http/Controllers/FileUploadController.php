@@ -110,16 +110,30 @@ class FileUploadController extends Controller
     public function complete(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AppSettingsService $settings, AuditLogger $audit): JsonResponse
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
+
+        if ($file->status === FileStatus::Ready && $file->current_version_id) {
+            return response()->json(['ok' => true]);
+        }
+
         $data = $request->validate([
-            'parts' => ['nullable', 'array'],
-            'parts.*.partNumber' => ['required_with:parts', 'integer'],
+            'parts' => ['nullable', 'array', 'max:10000'],
+            'parts.*.partNumber' => ['required_with:parts', 'integer', 'min:1', 'max:10000', 'distinct'],
             'parts.*.etag' => ['required_with:parts', 'string'],
         ]);
         $upload = $this->activeUpload($file);
 
         if ($upload->provider_upload_id) {
             abort_if(empty($data['parts']), 422, 'Multipart parts are required.');
-            $storage->completeMultipartUpload($upload->storage_key, $upload->provider_upload_id, $data['parts']);
+            $expectedPartCount = (int) ceil($upload->size_bytes / config('drive.multipart_chunk_size_bytes'));
+            $parts = collect($data['parts'])->sortBy('partNumber')->values();
+
+            abort_unless(
+                $parts->pluck('partNumber')->all() === range(1, $expectedPartCount),
+                422,
+                'Multipart parts are incomplete or out of range.',
+            );
+
+            $storage->completeMultipartUpload($upload->storage_key, $upload->provider_upload_id, $parts->all());
         }
 
         $metadata = $storage->objectMetadata($upload->storage_key);
@@ -137,9 +151,15 @@ class FileUploadController extends Controller
             return $this->failCompletion($file, $upload, 'Uploaded object did not match the expected upload policy.', 422);
         }
 
-        DB::transaction(function () use ($request, $file, $upload, $storage, $metadata): void {
+        $completed = DB::transaction(function () use ($request, $file, $upload, $storage, $metadata): bool {
+            $lockedFile = DriveFile::query()->lockForUpdate()->findOrFail($file->id);
+
+            if ($lockedFile->status === FileStatus::Ready && $lockedFile->current_version_id) {
+                return false;
+            }
+
             $version = FileVersion::query()->create([
-                'file_id' => $file->id,
+                'file_id' => $lockedFile->id,
                 'version_number' => 1,
                 'storage_bucket' => $storage->bucket(),
                 'storage_key' => $upload->storage_key,
@@ -149,16 +169,20 @@ class FileUploadController extends Controller
                 'created_at' => now(),
             ]);
 
-            $file->update([
+            $lockedFile->update([
                 'status' => FileStatus::Ready,
                 'current_version_id' => $version->id,
                 'size_bytes' => $metadata['contentLength'],
                 'mime_type' => $metadata['contentType'] ?? $upload->content_type,
             ]);
             $upload->update(['upload_status' => UploadStatus::Completed, 'completed_at' => now()]);
+
+            return true;
         });
 
-        $audit->log('file.upload.completed', 'file', $file->id, ['sizeBytes' => $upload->size_bytes], $request);
+        if ($completed) {
+            $audit->log('file.upload.completed', 'file', $file->id, ['sizeBytes' => $upload->size_bytes], $request);
+        }
 
         return response()->json(['ok' => true]);
     }

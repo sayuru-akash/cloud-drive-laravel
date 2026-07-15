@@ -257,23 +257,54 @@ async function completeUpload(
     fileId: string,
     body: Record<string, unknown>,
 ): Promise<void> {
-    const response = await fetch(`/api/files/${fileId}/complete-upload`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-        },
-        body: JSON.stringify(body),
-    });
+    let failureMessage = 'The app could not finalize this upload.';
 
-    if (!response.ok) {
-        throw new Error(
-            await responseError(
-                response,
-                'The app could not finalize this upload.',
-            ),
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        let response: Response;
+
+        try {
+            response = await fetch(`/api/files/${fileId}/complete-upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken(),
+                },
+                body: JSON.stringify(body),
+            });
+        } catch (error) {
+            failureMessage =
+                error instanceof Error
+                    ? error.message
+                    : 'The connection was interrupted while finalizing this upload.';
+
+            if (attempt === 3) {
+                throw new Error(failureMessage);
+            }
+
+            await retryDelay(attempt);
+
+            continue;
+        }
+
+        if (response.ok) {
+            return;
+        }
+
+        failureMessage = await responseError(
+            response,
+            'The app could not finalize this upload.',
         );
+        const retryable =
+            response.status >= 500 || [408, 425, 429].includes(response.status);
+
+        if (!retryable || attempt === 3) {
+            throw new Error(failureMessage);
+        }
+
+        await retryDelay(attempt);
     }
+
+    throw new Error(failureMessage);
 }
 
 async function uploadOne(upload: UploadQueueItem): Promise<void> {
@@ -451,6 +482,7 @@ async function uploadOne(upload: UploadQueueItem): Promise<void> {
         message: 'Combining and verifying parts',
         progress: 98,
     });
+    parts.sort((left, right) => left.partNumber - right.partNumber);
     await completeUpload(payload.fileId, { parts });
     updateUpload(upload.id, {
         status: 'done',

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 
 class ObjectStorageService
@@ -83,17 +84,38 @@ class ObjectStorageService
     {
         usort($parts, fn (array $a, array $b): int => $a['partNumber'] <=> $b['partNumber']);
 
-        $this->client()->completeMultipartUpload([
-            'Bucket' => $this->bucket(),
-            'Key' => $storageKey,
-            'UploadId' => $uploadId,
-            'MultipartUpload' => [
-                'Parts' => array_map(fn (array $part): array => [
-                    'ETag' => $part['etag'],
-                    'PartNumber' => $part['partNumber'],
-                ], $parts),
-            ],
-        ]);
+        try {
+            $this->client()->completeMultipartUpload([
+                'Bucket' => $this->bucket(),
+                'Key' => $storageKey,
+                'UploadId' => $uploadId,
+                'MultipartUpload' => [
+                    'Parts' => array_map(fn (array $part): array => [
+                        'ETag' => $part['etag'],
+                        'PartNumber' => $part['partNumber'],
+                    ], $parts),
+                ],
+            ]);
+        } catch (S3Exception $exception) {
+            if ($exception->getAwsErrorCode() !== 'NoSuchUpload' || ! $this->completedObjectExists($storageKey)) {
+                throw $exception;
+            }
+        }
+    }
+
+    private function completedObjectExists(string $storageKey): bool
+    {
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            if ($this->objectExists($storageKey)) {
+                return true;
+            }
+
+            if ($attempt < 3) {
+                usleep(250_000);
+            }
+        }
+
+        return false;
     }
 
     public function abortMultipartUpload(string $storageKey, string $uploadId): void
