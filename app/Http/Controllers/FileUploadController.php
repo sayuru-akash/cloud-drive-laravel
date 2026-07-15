@@ -95,8 +95,12 @@ class FileUploadController extends Controller
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
         $data = $request->validate(['partNumber' => ['required', 'integer', 'min:1', 'max:10000']]);
-        $upload = $file->uploads()->where('upload_status', UploadStatus::Initiated)->latest()->firstOrFail();
+        $upload = $this->activeUpload($file);
         abort_unless($upload->provider_upload_id, 422);
+
+        if ($upload->upload_status === UploadStatus::Initiated) {
+            $upload->update(['upload_status' => UploadStatus::Uploading]);
+        }
 
         return response()->json([
             'uploadUrl' => $storage->createMultipartPartUploadUrl($upload->storage_key, $upload->provider_upload_id, (int) $data['partNumber']),
@@ -111,7 +115,7 @@ class FileUploadController extends Controller
             'parts.*.partNumber' => ['required_with:parts', 'integer'],
             'parts.*.etag' => ['required_with:parts', 'string'],
         ]);
-        $upload = $file->uploads()->where('upload_status', UploadStatus::Initiated)->latest()->firstOrFail();
+        $upload = $this->activeUpload($file);
 
         if ($upload->provider_upload_id) {
             abort_if(empty($data['parts']), 422, 'Multipart parts are required.');
@@ -167,6 +171,17 @@ class FileUploadController extends Controller
         return response()->json(['message' => $message], $status);
     }
 
+    private function activeUpload(DriveFile $file): Upload
+    {
+        return $file->uploads()
+            ->whereIn('upload_status', [
+                UploadStatus::Initiated->value,
+                UploadStatus::Uploading->value,
+            ])
+            ->latest()
+            ->firstOrFail();
+    }
+
     public function cancel(Request $request, DriveFile $file, ObjectStorageService $storage, DrivePermissionService $permissions, AuditLogger $audit): JsonResponse
     {
         abort_unless($permissions->canManage($request->user(), $file), 403);
@@ -178,12 +193,14 @@ class FileUploadController extends Controller
             ->latest()
             ->first();
 
-        if ($upload) {
-            if ($upload->provider_upload_id) {
-                rescue(fn () => $storage->abortMultipartUpload($upload->storage_key, $upload->provider_upload_id), report: false);
-            }
-            $upload->update(['upload_status' => UploadStatus::Cancelled]);
+        abort_unless($upload, 409, 'There is no active upload to cancel.');
+
+        if ($upload->provider_upload_id) {
+            rescue(fn () => $storage->abortMultipartUpload($upload->storage_key, $upload->provider_upload_id), report: false);
         }
+
+        rescue(fn () => $storage->deleteObject($upload->storage_key), report: false);
+        $upload->update(['upload_status' => UploadStatus::Cancelled]);
 
         $file->update(['status' => FileStatus::Failed, 'is_deleted' => true, 'deleted_at' => now()]);
         $audit->log('file.upload.cancelled', 'file', $file->id, [], $request);

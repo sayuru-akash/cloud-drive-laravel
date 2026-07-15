@@ -290,6 +290,12 @@ it('cancels an active uploading record and moves its pending file to trash', fun
         'expires_at' => now()->addHour(),
     ]);
 
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('deleteObject')
+        ->once()
+        ->with('objects/stuck.bin')
+        ->andReturnNull();
+
     $this->actingAs($owner)
         ->postJson("/api/files/{$file->id}/cancel-upload")
         ->assertOk();
@@ -297,6 +303,74 @@ it('cancels an active uploading record and moves its pending file to trash', fun
     expect($upload->fresh()->upload_status)->toBe(UploadStatus::Cancelled)
         ->and($file->fresh()->status)->toBe(FileStatus::Failed)
         ->and($file->fresh()->is_deleted)->toBeTrue();
+});
+
+it('does not cancel a file when no active upload exists', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'ready.pdf',
+        'display_name' => 'ready.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/cancel-upload")
+        ->assertConflict()
+        ->assertJson(['message' => 'There is no active upload to cancel.']);
+
+    expect($file->fresh()->status)->toBe(FileStatus::Ready)
+        ->and($file->fresh()->is_deleted)->toBeFalse();
+});
+
+it('marks multipart uploads as uploading while continuing to sign later parts', function (): void {
+    $owner = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'large-video.mp4',
+        'display_name' => 'large-video.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 120 * 1024 * 1024,
+        'status' => FileStatus::Pending,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $upload = Upload::query()->create([
+        'file_id' => $file->id,
+        'initiated_by_user_id' => $owner->id,
+        'upload_status' => UploadStatus::Initiated,
+        'storage_key' => 'objects/large-video.mp4',
+        'provider_upload_id' => 'provider-upload-id',
+        'content_type' => 'video/mp4',
+        'size_bytes' => 120 * 1024 * 1024,
+        'expires_at' => now()->addHour(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('createMultipartPartUploadUrl')
+        ->once()
+        ->with('objects/large-video.mp4', 'provider-upload-id', 1)
+        ->andReturn('https://storage.example/part-1');
+    $storage->shouldReceive('createMultipartPartUploadUrl')
+        ->once()
+        ->with('objects/large-video.mp4', 'provider-upload-id', 2)
+        ->andReturn('https://storage.example/part-2');
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/multipart-part", ['partNumber' => 1])
+        ->assertOk()
+        ->assertJson(['uploadUrl' => 'https://storage.example/part-1']);
+
+    expect($upload->fresh()->upload_status)->toBe(UploadStatus::Uploading);
+
+    $this->actingAs($owner)
+        ->postJson("/api/files/{$file->id}/multipart-part", ['partNumber' => 2])
+        ->assertOk()
+        ->assertJson(['uploadUrl' => 'https://storage.example/part-2']);
 });
 
 it('completes an upload only after the stored object metadata matches policy', function (): void {
@@ -314,7 +388,7 @@ it('completes an upload only after the stored object metadata matches policy', f
     $upload = Upload::query()->create([
         'file_id' => $file->id,
         'initiated_by_user_id' => $owner->id,
-        'upload_status' => UploadStatus::Initiated,
+        'upload_status' => UploadStatus::Uploading,
         'storage_key' => 'objects/ready.txt',
         'content_type' => 'text/plain',
         'size_bytes' => 12,

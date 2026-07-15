@@ -84,6 +84,7 @@ type UploadQueueItem = {
         | 'error';
     mimeType: string | null;
     message: string;
+    remoteFileId?: string;
 };
 type Paginated<T> = {
     data: T[];
@@ -123,6 +124,8 @@ const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
 const accessValue = ref('private');
 const accessProcessing = ref(false);
+const activeUploadRequests = new Map<string, Set<XMLHttpRequest>>();
+const failedUploadQueues = new Set<string>();
 const driveRefreshProps = [
     'files',
     'folders',
@@ -166,15 +169,50 @@ const activeFilters = computed(
 );
 const folderItems = computed(() => props.folders.data);
 const fileItems = computed(() => props.files.data);
-const visibleUploads = computed(() =>
-    uploadQueue.value.filter((item) => item.status !== 'done').slice(-5),
+const unfinishedUploads = computed(() =>
+    uploadQueue.value.filter((item) => item.status !== 'done'),
+);
+const visibleUploads = computed(() => {
+    const active = unfinishedUploads.value.filter(
+        (item) => item.status !== 'queued' && item.status !== 'error',
+    );
+    const errors = unfinishedUploads.value.filter(
+        (item) => item.status === 'error',
+    );
+    const queued = unfinishedUploads.value.filter(
+        (item) => item.status === 'queued',
+    );
+
+    return [...active, ...errors, ...queued].slice(0, 5);
+});
+const uploadSummary = computed(() => {
+    const active = unfinishedUploads.value.filter((item) =>
+        ['preparing', 'uploading', 'finalizing'].includes(item.status),
+    ).length;
+    const queued = unfinishedUploads.value.filter(
+        (item) => item.status === 'queued',
+    ).length;
+    const errors = unfinishedUploads.value.filter(
+        (item) => item.status === 'error',
+    ).length;
+
+    return [
+        active ? `${active} active` : '',
+        queued ? `${queued} queued` : '',
+        errors ? `${errors} failed` : '',
+    ]
+        .filter(Boolean)
+        .join(' · ');
+});
+const hiddenUploadCount = computed(() =>
+    Math.max(0, unfinishedUploads.value.length - visibleUploads.value.length),
 );
 const flash = computed(() => page.props.flash ?? {});
 const renameTitle = computed(
     () => `Rename ${renameTarget.value?.kind === 'folder' ? 'folder' : 'file'}`,
 );
 const trashDescription = computed(() => {
-    if (! trashTarget.value) {
+    if (!trashTarget.value) {
         return '';
     }
 
@@ -185,7 +223,7 @@ const trashDescription = computed(() => {
     return `Move "${trashTarget.value.item.display_name}" to trash?`;
 });
 const accessResourceName = computed(() => {
-    if (! accessTarget.value) {
+    if (!accessTarget.value) {
         return '';
     }
 
@@ -194,7 +232,7 @@ const accessResourceName = computed(() => {
         : accessTarget.value.item.name;
 });
 const accessDescription = computed(() => {
-    if (! accessTarget.value) {
+    if (!accessTarget.value) {
         return '';
     }
 
@@ -214,7 +252,8 @@ function filterPayload() {
         visibility: filterValues.value.visibility || undefined,
         type: filterValues.value.type || undefined,
         sort:
-            filterValues.value.sort && filterValues.value.sort !== 'updated-desc'
+            filterValues.value.sort &&
+            filterValues.value.sort !== 'updated-desc'
                 ? filterValues.value.sort
                 : undefined,
         folder: props.folderId || undefined,
@@ -222,16 +261,12 @@ function filterPayload() {
 }
 
 function visitWithFilters() {
-    router.get(
-        '/files',
-        filterPayload(),
-        {
-            only: driveRefreshProps,
-            preserveScroll: true,
-            preserveState: true,
-            replace: true,
-        },
-    );
+    router.get('/files', filterPayload(), {
+        only: driveRefreshProps,
+        preserveScroll: true,
+        preserveState: true,
+        replace: true,
+    });
 }
 
 function queueFilterVisit() {
@@ -275,7 +310,7 @@ function clearFilters() {
 }
 
 function openFilePicker() {
-    if (! props.canManageCurrentLocation) {
+    if (!props.canManageCurrentLocation) {
         return;
     }
 
@@ -283,7 +318,7 @@ function openFilePicker() {
 }
 
 function openCreateFolderDialog() {
-    if (! props.canManageCurrentLocation) {
+    if (!props.canManageCurrentLocation) {
         return;
     }
 
@@ -300,7 +335,7 @@ function closeCreateFolderDialog() {
 }
 
 function createFolder() {
-    if (! props.canManageCurrentLocation) {
+    if (!props.canManageCurrentLocation) {
         return;
     }
 
@@ -348,7 +383,7 @@ function submitRename() {
     const target = renameTarget.value;
     const next = renameValue.value.trim();
 
-    if (! target || ! next) {
+    if (!target || !next) {
         return;
     }
 
@@ -378,7 +413,7 @@ function closeTrashDialog() {
 function confirmTrash() {
     const target = trashTarget.value;
 
-    if (! target) {
+    if (!target) {
         return;
     }
 
@@ -400,7 +435,7 @@ function manageAccess(target: AccessTarget) {
 }
 
 function closeAccessDialog(force = false) {
-    if (accessProcessing.value && ! force) {
+    if (accessProcessing.value && !force) {
         return;
     }
 
@@ -411,7 +446,7 @@ function closeAccessDialog(force = false) {
 function submitAccess() {
     const target = accessTarget.value;
 
-    if (! target) {
+    if (!target) {
         return;
     }
 
@@ -456,7 +491,7 @@ function closeShareDialog() {
 }
 
 function submitShare() {
-    if (! shareTarget.value) {
+    if (!shareTarget.value) {
         return;
     }
 
@@ -521,6 +556,7 @@ async function runPool<T>(
 }
 
 function uploadBlob(
+    queueId: string,
     url: string,
     blob: Blob,
     contentType: string | null,
@@ -528,6 +564,9 @@ function uploadBlob(
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        const requests = activeUploadRequests.get(queueId) ?? new Set();
+        requests.add(xhr);
+        activeUploadRequests.set(queueId, requests);
         xhr.open('PUT', url);
 
         if (contentType) {
@@ -540,20 +579,78 @@ function uploadBlob(
             }
         };
 
+        const removeRequest = () => {
+            requests.delete(xhr);
+
+            if (requests.size === 0) {
+                activeUploadRequests.delete(queueId);
+            }
+        };
+
         xhr.onload = () => {
+            removeRequest();
+
             if (xhr.status >= 200 && xhr.status < 300) {
-                resolve(xhr.getResponseHeader('ETag') ?? '');
+                const etag = xhr.getResponseHeader('ETag');
+
+                if (!etag) {
+                    reject(
+                        new Error(
+                            'Storage did not return the uploaded part identifier.',
+                        ),
+                    );
+
+                    return;
+                }
+
+                resolve(etag);
 
                 return;
             }
 
             reject(new Error(`Upload failed with status ${xhr.status}`));
         };
-        xhr.onerror = () =>
+        xhr.onerror = () => {
+            removeRequest();
             reject(new Error('Upload failed before reaching storage.'));
-        xhr.onabort = () => reject(new Error('Upload cancelled.'));
+        };
+        xhr.onabort = () => {
+            removeRequest();
+            reject(new Error('Upload cancelled.'));
+        };
         xhr.send(blob);
     });
+}
+
+function abortUploadRequests(queueId: string) {
+    activeUploadRequests.get(queueId)?.forEach((request) => request.abort());
+    activeUploadRequests.delete(queueId);
+}
+
+function retryDelay(attempt: number) {
+    return new Promise((resolve) =>
+        window.setTimeout(resolve, 750 * 2 ** (attempt - 1)),
+    );
+}
+
+async function responseError(response: Response, fallback: string) {
+    const body = (await response.json().catch(() => null)) as {
+        message?: string;
+    } | null;
+
+    return body?.message || fallback;
+}
+
+async function cancelRemoteUpload(fileId: string) {
+    const response = await fetch(`/api/files/${fileId}/cancel-upload`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrfToken(),
+        },
+    });
+
+    return response.ok;
 }
 
 async function completeUpload(fileId: string, body: Record<string, unknown>) {
@@ -567,7 +664,12 @@ async function completeUpload(fileId: string, body: Record<string, unknown>) {
     });
 
     if (!response.ok) {
-        throw new Error('The app could not finalize this upload.');
+        throw new Error(
+            await responseError(
+                response,
+                'The app could not finalize this upload.',
+            ),
+        );
     }
 }
 
@@ -591,10 +693,13 @@ async function uploadOne(file: globalThis.File, queueId: string) {
     });
 
     if (!init.ok) {
-        throw new Error('Upload rejected by workspace policy.');
+        throw new Error(
+            await responseError(init, 'Upload rejected by workspace policy.'),
+        );
     }
 
     const payload = await init.json();
+    updateUpload(queueId, { remoteFileId: payload.fileId });
 
     if (!payload.multipart) {
         updateUpload(queueId, {
@@ -602,6 +707,7 @@ async function uploadOne(file: globalThis.File, queueId: string) {
             message: 'Uploading to B2',
         });
         await uploadBlob(
+            queueId,
             payload.uploadUrl,
             file,
             file.type || 'application/octet-stream',
@@ -652,42 +758,74 @@ async function uploadOne(file: globalThis.File, queueId: string) {
             start,
             Math.min(start + payload.chunkSize, file.size),
         );
-        const partResponse = await fetch(
-            `/api/files/${payload.fileId}/multipart-part`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken(),
-                },
-                body: JSON.stringify({ partNumber }),
-            },
-        );
+        let etag = '';
 
-        if (!partResponse.ok) {
-            throw new Error(`Could not sign part ${partNumber}.`);
-        }
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            try {
+                if (failedUploadQueues.has(queueId)) {
+                    throw new Error(
+                        'Upload stopped after another part failed.',
+                    );
+                }
 
-        const partPayload = await partResponse.json();
-        const etag = await uploadBlob(
-            partPayload.uploadUrl,
-            blob,
-            null,
-            (loaded) => {
-                partProgress.set(partNumber, loaded);
-                const uploadedBytes = Array.from(partProgress.values()).reduce(
-                    (sum, current) => sum + current,
-                    0,
+                partProgress.set(partNumber, 0);
+                const partResponse = await fetch(
+                    `/api/files/${payload.fileId}/multipart-part`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken(),
+                        },
+                        body: JSON.stringify({ partNumber }),
+                    },
+                );
+
+                if (!partResponse.ok) {
+                    throw new Error(
+                        await responseError(
+                            partResponse,
+                            `Could not sign part ${partNumber}.`,
+                        ),
+                    );
+                }
+
+                const partPayload = await partResponse.json();
+                etag = await uploadBlob(
+                    queueId,
+                    partPayload.uploadUrl,
+                    blob,
+                    null,
+                    (loaded) => {
+                        partProgress.set(partNumber, loaded);
+                        const uploadedBytes = Array.from(
+                            partProgress.values(),
+                        ).reduce((sum, current) => sum + current, 0);
+                        updateUpload(queueId, {
+                            uploadedBytes,
+                            progress: Math.min(
+                                95,
+                                Math.round((uploadedBytes / file.size) * 95),
+                            ),
+                        });
+                    },
                 );
                 updateUpload(queueId, {
-                    uploadedBytes,
-                    progress: Math.min(
-                        95,
-                        Math.round((uploadedBytes / file.size) * 95),
-                    ),
+                    message: `Uploading ${payload.totalParts} parts in parallel`,
                 });
-            },
-        );
+
+                break;
+            } catch (error) {
+                if (attempt === 3 || failedUploadQueues.has(queueId)) {
+                    throw error;
+                }
+
+                updateUpload(queueId, {
+                    message: `Retrying part ${partNumber} (${attempt + 1}/3)`,
+                });
+                await retryDelay(attempt);
+            }
+        }
 
         parts.push({ partNumber, etag });
     });
@@ -707,7 +845,7 @@ async function uploadOne(file: globalThis.File, queueId: string) {
 }
 
 async function uploadFiles(list: FileList) {
-    if (! props.canManageCurrentLocation) {
+    if (!props.canManageCurrentLocation) {
         return;
     }
 
@@ -735,12 +873,20 @@ async function uploadFiles(list: FileList) {
             try {
                 await uploadOne(file, item.id);
             } catch (error) {
+                failedUploadQueues.add(item.id);
+                abortUploadRequests(item.id);
+                const cleanedUp = item.remoteFileId
+                    ? await cancelRemoteUpload(item.remoteFileId).catch(
+                          () => false,
+                      )
+                    : false;
                 updateUpload(item.id, {
                     status: 'error',
                     message:
-                        error instanceof Error
+                        (error instanceof Error
                             ? error.message
-                            : 'Upload failed',
+                            : 'Upload failed') +
+                        (cleanedUp ? ' Upload session cleaned up.' : ''),
                 });
             }
         },
@@ -769,7 +915,7 @@ function handleInput(event: Event) {
 function revalidateDrive(force = false) {
     const now = Date.now();
 
-    if (! force && now - lastRevalidatedAt < 15_000) {
+    if (!force && now - lastRevalidatedAt < 15_000) {
         return;
     }
 
@@ -1139,9 +1285,11 @@ watch(
                         class="mt-5 block min-w-0 truncate font-semibold text-ink-950 dark:text-white"
                         >{{ folder.name }}</Link
                     >
-                    <div class="mt-auto flex items-center justify-between gap-3 pt-5">
+                    <div
+                        class="mt-auto flex items-center justify-between gap-3 pt-5"
+                    >
                         <StatusBadge :value="folder.visibility" />
-                        <span class="text-xs text-ink-500 dark:text-ink-400">
+                        <span class="dark:text-ink-400 text-xs text-ink-500">
                             {{ formatDate(folder.updated_at) }}
                         </span>
                     </div>
@@ -1168,7 +1316,9 @@ watch(
                                 type="button"
                                 class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                                 title="Share"
-                                @click="createShare({ kind: 'file', item: file })"
+                                @click="
+                                    createShare({ kind: 'file', item: file })
+                                "
                             >
                                 <Share2 class="h-4 w-4" />
                             </button>
@@ -1183,7 +1333,9 @@ watch(
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" class="w-44">
-                                    <DropdownMenuItem @select="renameFile(file)">
+                                    <DropdownMenuItem
+                                        @select="renameFile(file)"
+                                    >
                                         <Pencil class="h-4 w-4" />
                                         Rename
                                     </DropdownMenuItem>
@@ -1214,13 +1366,17 @@ watch(
                     >
                         {{ file.display_name }}
                     </p>
-                    <p class="mt-1 truncate text-sm text-ink-600 dark:text-ink-300">
+                    <p
+                        class="mt-1 truncate text-sm text-ink-600 dark:text-ink-300"
+                    >
                         {{ formatBytes(file.size_bytes) }} ·
                         {{ formatFileType(file.display_name, file.mime_type) }}
                     </p>
-                    <div class="mt-auto flex items-center justify-between gap-3 pt-5">
+                    <div
+                        class="mt-auto flex items-center justify-between gap-3 pt-5"
+                    >
                         <StatusBadge :value="file.visibility" />
-                        <span class="text-xs text-ink-500 dark:text-ink-400">
+                        <span class="dark:text-ink-400 text-xs text-ink-500">
                             {{ formatDate(file.updated_at) }}
                         </span>
                     </div>
@@ -1257,7 +1413,7 @@ watch(
                     <button
                         v-if="folder.can_manage"
                         type="button"
-                        class="justify-self-start rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10 md:justify-self-end"
+                        class="justify-self-start rounded-full p-2 text-brand hover:bg-ink-950/5 md:justify-self-end dark:hover:bg-white/10"
                         title="Share"
                         @click="
                             createShare({
@@ -1272,7 +1428,7 @@ watch(
                         <DropdownMenuTrigger as-child>
                             <button
                                 type="button"
-                                class="justify-self-start rounded-full p-2 text-ink-600 hover:bg-ink-950/5 dark:text-ink-300 dark:hover:bg-white/10 md:justify-self-end"
+                                class="justify-self-start rounded-full p-2 text-ink-600 hover:bg-ink-950/5 md:justify-self-end dark:text-ink-300 dark:hover:bg-white/10"
                                 aria-label="Folder actions"
                             >
                                 <MoreHorizontal class="h-4 w-4" />
@@ -1319,7 +1475,13 @@ watch(
                                 {{ file.display_name }}
                             </p>
                             <p class="text-xs text-ink-600 dark:text-ink-300">
-                                {{ formatFileType(file.display_name, file.mime_type) }} ·
+                                {{
+                                    formatFileType(
+                                        file.display_name,
+                                        file.mime_type,
+                                    )
+                                }}
+                                ·
                                 {{ formatDate(file.updated_at) }}
                             </p>
                         </div>
@@ -1399,13 +1561,17 @@ watch(
             class="grid gap-3 md:grid-cols-2"
         >
             <div v-if="folders.links.length > 3" class="cloud-panel p-4">
-                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                <p
+                    class="mb-3 text-sm font-semibold text-ink-950 dark:text-white"
+                >
                     Folders
                 </p>
                 <PaginationLinks :links="folders.links" />
             </div>
             <div v-if="files.links.length > 3" class="cloud-panel p-4">
-                <p class="mb-3 text-sm font-semibold text-ink-950 dark:text-white">
+                <p
+                    class="mb-3 text-sm font-semibold text-ink-950 dark:text-white"
+                >
                     Files
                 </p>
                 <PaginationLinks :links="files.links" />
@@ -1428,7 +1594,7 @@ watch(
                         <span>Name</span>
                         <input
                             v-model="folderForm.name"
-                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
+                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm transition outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
                             autocomplete="off"
                             autofocus
                         />
@@ -1445,7 +1611,7 @@ watch(
                             :class="
                                 folderForm.visibility === 'private'
                                     ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
                             "
                             @click="folderForm.visibility = 'private'"
                         >
@@ -1462,7 +1628,7 @@ watch(
                             :class="
                                 folderForm.visibility === 'workspace'
                                     ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
                             "
                             @click="folderForm.visibility = 'workspace'"
                         >
@@ -1519,7 +1685,7 @@ watch(
                         <span>Name</span>
                         <input
                             v-model="renameValue"
-                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
+                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm transition outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
                             autocomplete="off"
                         />
                     </label>
@@ -1595,7 +1761,7 @@ watch(
                             :class="
                                 accessValue === 'private'
                                     ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
                             "
                             @click="accessValue = 'private'"
                         >
@@ -1612,7 +1778,7 @@ watch(
                             :class="
                                 accessValue === 'workspace'
                                     ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
                             "
                             @click="accessValue = 'workspace'"
                         >
@@ -1671,7 +1837,7 @@ watch(
                             :class="
                                 shareForm.expires_days === days
                                     ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'border-line bg-white/70 text-ink-700 dark:bg-white/10 dark:text-ink-200'
+                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
                             "
                             @click="shareForm.expires_days = days"
                         >
@@ -1690,7 +1856,7 @@ watch(
                             type="number"
                             min="1"
                             max="90"
-                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
+                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm transition outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
                         />
                         <span
                             v-if="shareForm.errors.expires_days"
@@ -1732,7 +1898,11 @@ watch(
                             :disabled="shareForm.processing"
                         >
                             <Share2 class="h-4 w-4" />
-                            {{ shareForm.processing ? 'Creating' : 'Create link' }}
+                            {{
+                                shareForm.processing
+                                    ? 'Creating'
+                                    : 'Create link'
+                            }}
                         </button>
                     </DialogFooter>
                 </form>
@@ -1747,9 +1917,9 @@ watch(
                 <p class="font-semibold text-ink-950 dark:text-white">
                     Uploads
                 </p>
-                <span class="text-xs text-ink-600 dark:text-ink-300"
-                    >Parallel</span
-                >
+                <span class="text-xs text-ink-600 dark:text-ink-300">
+                    {{ uploadSummary }}
+                </span>
             </div>
             <div class="mt-3 space-y-3">
                 <div
@@ -1772,7 +1942,12 @@ watch(
                                 <p
                                     class="mt-0.5 truncate text-xs text-ink-600 dark:text-ink-300"
                                 >
-                                    {{ formatFileType(upload.name, upload.mimeType) }}
+                                    {{
+                                        formatFileType(
+                                            upload.name,
+                                            upload.mimeType,
+                                        )
+                                    }}
                                     · {{ upload.message }} ·
                                     {{ formatBytes(upload.uploadedBytes) }} /
                                     {{ formatBytes(upload.size) }}
@@ -1798,6 +1973,12 @@ watch(
                     </div>
                 </div>
             </div>
+            <p
+                v-if="hiddenUploadCount > 0"
+                class="mt-3 text-xs text-ink-600 dark:text-ink-300"
+            >
+                +{{ hiddenUploadCount }} more in this batch
+            </p>
         </div>
     </main>
 </template>
