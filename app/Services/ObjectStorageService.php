@@ -13,7 +13,7 @@ class ObjectStorageService
         return new S3Client([
             'version' => 'latest',
             'region' => (string) config('drive.storage.region', 'auto'),
-            'endpoint' => (string) config('drive.storage.endpoint'),
+            'endpoint' => $this->endpoint(),
             'use_path_style_endpoint' => (bool) config('drive.storage.path_style', true),
             'credentials' => [
                 'key' => (string) config('drive.storage.key_id'),
@@ -212,9 +212,12 @@ class ObjectStorageService
             $exception->getMessage(),
         ])));
 
-        if (str_contains($errorDetails, 'cap exceeded')
+        $hasCapacityMessage = str_contains($errorDetails, 'cap exceeded')
             || str_contains($errorDetails, 'download bandwidth')
-            || str_contains($errorDetails, 'class b')) {
+            || str_contains($errorDetails, 'class b');
+
+        if ($hasCapacityMessage
+            || ($exception->getStatusCode() === 403 && str_contains(strtolower($this->endpoint()), 'backblazeb2.com'))) {
             return DownloadUnavailableException::capacityExceeded($exception);
         }
 
@@ -224,5 +227,10 @@ class ObjectStorageService
         }
 
         return DownloadUnavailableException::temporary($exception);
+    }
+
+    protected function endpoint(): string
+    {
+        return (string) config('drive.storage.endpoint');
     }
 }

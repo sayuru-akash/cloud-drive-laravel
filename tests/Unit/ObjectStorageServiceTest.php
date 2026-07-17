@@ -62,6 +62,46 @@ it('maps a Backblaze download cap response to a safe domain exception', function
     }
 });
 
+it('maps a bodyless Backblaze head forbidden response to the download cap warning', function (): void {
+    $providerException = new S3Exception(
+        'Forbidden.',
+        new Command('HeadObject'),
+        ['response' => new Response(403)],
+    );
+    $client = Mockery::mock(S3Client::class);
+    $client->shouldReceive('headObject')->once()->andThrow($providerException);
+
+    $service = new class($client) extends ObjectStorageService
+    {
+        public function __construct(private readonly S3Client $storageClient) {}
+
+        public function client(): S3Client
+        {
+            return $this->storageClient;
+        }
+
+        public function bucket(): string
+        {
+            return 'test-bucket';
+        }
+
+        protected function endpoint(): string
+        {
+            return 'https://s3.us-west-004.backblazeb2.com';
+        }
+    };
+
+    try {
+        $service->ensureDownloadAvailable('objects/video.mp4');
+        test()->fail('Expected the bodyless Backblaze response to block the download.');
+    } catch (DownloadUnavailableException $exception) {
+        expect($exception->getMessage())
+            ->toBe('The storage provider could not serve this download.')
+            ->and($exception->userMessage())
+            ->toContain('storage download limit has been reached');
+    }
+});
+
 it('recovers multipart completion when the provider already created the object', function (): void {
     $exception = new S3Exception(
         'The upload no longer exists.',
