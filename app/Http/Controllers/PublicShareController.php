@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\FileStatus;
 use App\Enums\ShareResourceType;
+use App\Exceptions\DownloadUnavailableException;
 use App\Models\DriveFile;
 use App\Models\Folder;
 use App\Models\ShareLink;
@@ -45,6 +46,7 @@ class PublicShareController extends Controller
                 'fileDownloadBaseUrl' => null,
                 'expiresAt' => null,
                 'folderDownload' => null,
+                'downloadError' => $request->session()->get('downloadError'),
             ]);
         }
 
@@ -69,6 +71,7 @@ class PublicShareController extends Controller
                 'fileDownloadBaseUrl' => null,
                 'expiresAt' => $share->expires_at,
                 'folderDownload' => null,
+                'downloadError' => $request->session()->get('downloadError'),
             ]);
         }
 
@@ -132,6 +135,7 @@ class PublicShareController extends Controller
                 'file_limit' => self::ZIP_FILE_LIMIT,
                 'size_limit_bytes' => self::ZIP_SIZE_LIMIT_BYTES,
             ],
+            'downloadError' => $request->session()->get('downloadError'),
         ]);
     }
 
@@ -144,6 +148,13 @@ class PublicShareController extends Controller
         if ($share->resource_type === ShareResourceType::File) {
             $file = $share->file()->with('currentVersion')->firstOrFail();
             abort_unless($this->isFileShareable($file), 404);
+
+            try {
+                $storage->ensureDownloadAvailable($file->currentVersion->storage_key);
+            } catch (DownloadUnavailableException $exception) {
+                return $this->downloadFailureRedirect($token, $exception);
+            }
+
             $audit->log('file.downloaded', 'file', $file->id, ['publicShareId' => $share->id], request());
 
             return redirect()->away($storage->createDownloadUrl($file->currentVersion->storage_key, $file->display_name), 307);
@@ -157,7 +168,12 @@ class PublicShareController extends Controller
         abort_if($files->isEmpty(), 404, 'This folder does not contain downloadable files.');
         abort_if($files->count() > self::ZIP_FILE_LIMIT || $files->sum('size_bytes') > self::ZIP_SIZE_LIMIT_BYTES, 422, 'This folder is too large to download as a zip.');
 
-        $zipPath = $this->createFolderZip($root, $files, $storage);
+        try {
+            $zipPath = $this->createFolderZip($root, $files, $storage);
+        } catch (DownloadUnavailableException $exception) {
+            return $this->downloadFailureRedirect($token, $exception);
+        }
+
         $audit->log('folder.downloaded', 'folder', $root->id, ['publicShareId' => $share->id, 'fileCount' => $files->count()], request());
 
         return response()
@@ -181,9 +197,27 @@ class PublicShareController extends Controller
             ->findOrFail($file);
         abort_unless($this->isFileShareable($file), 404);
 
+        try {
+            $storage->ensureDownloadAvailable($file->currentVersion->storage_key);
+        } catch (DownloadUnavailableException $exception) {
+            return $this->downloadFailureRedirect($token, $exception, $file->folder_id);
+        }
+
         $audit->log('file.downloaded', 'file', $file->id, ['publicShareId' => $share->id, 'folderShareId' => $root->id], request());
 
         return redirect()->away($storage->createDownloadUrl($file->currentVersion->storage_key, $file->display_name), 307);
+    }
+
+    private function downloadFailureRedirect(string $token, DownloadUnavailableException $exception, ?string $folderId = null): RedirectResponse
+    {
+        report($exception);
+
+        return redirect()
+            ->route('public-share.show', array_filter([
+                'token' => $token,
+                'folder' => $folderId,
+            ]))
+            ->with('downloadError', $exception->userMessage());
     }
 
     /** @return array{share:?ShareLink,status:string} */

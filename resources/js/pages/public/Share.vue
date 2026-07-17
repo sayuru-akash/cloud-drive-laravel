@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Download, Folder, Home } from 'lucide-vue-next';
+import { AlertTriangle, Download, Folder, Home } from 'lucide-vue-next';
 import { computed } from 'vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
@@ -43,6 +43,7 @@ const props = defineProps<{
         file_limit: number;
         size_limit_bytes: number;
     } | null;
+    downloadError: string | null;
 }>();
 
 const unavailableMessage = computed(() => {
@@ -149,6 +150,15 @@ function fileDownloadUrl(fileId: string) {
                     <Download class="h-4 w-4" />
                     Download folder
                 </a>
+            </div>
+
+            <div
+                v-if="downloadError"
+                role="alert"
+                class="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-100"
+            >
+                <AlertTriangle class="mt-0.5 h-5 w-5 shrink-0" />
+                <p>{{ downloadError }}</p>
             </div>
 
             <section

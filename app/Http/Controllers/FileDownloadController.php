@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\FileStatus;
+use App\Exceptions\DownloadUnavailableException;
 use App\Models\DriveFile;
 use App\Services\AuditLogger;
 use App\Services\DrivePermissionService;
@@ -18,6 +19,17 @@ class FileDownloadController extends Controller
         abort_unless($permissions->canView($request->user(), $file), 403);
         abort_unless($storage->isConfigured(), 503, 'Object storage is not configured.');
         $version = $file->currentVersion()->firstOrFail();
+
+        try {
+            $storage->ensureDownloadAvailable($version->storage_key);
+        } catch (DownloadUnavailableException $exception) {
+            report($exception);
+
+            return redirect()
+                ->route('files.index', array_filter(['folder' => $file->folder_id]))
+                ->with('error', $exception->userMessage());
+        }
+
         $audit->log('file.downloaded', 'file', $file->id, ['name' => $file->display_name], $request);
 
         return redirect()->away($storage->createDownloadUrl($version->storage_key, $file->display_name), 307);

@@ -1,9 +1,11 @@
 <?php
 
+use App\Exceptions\DownloadUnavailableException;
 use App\Services\ObjectStorageService;
 use Aws\Command;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
+use GuzzleHttp\Psr7\Response;
 
 it('builds stable storage keys', function (): void {
     $service = new ObjectStorageService;
@@ -17,6 +19,47 @@ it('builds safe attachment disposition headers', function (): void {
 
     expect($service->downloadDisposition('test (v2).pdf'))
         ->toBe('attachment; filename="test__v2_.pdf"; filename*=UTF-8\'\'test%20%28v2%29.pdf');
+});
+
+it('maps a Backblaze download cap response to a safe domain exception', function (): void {
+    $providerException = new S3Exception(
+        'Cannot download file, download bandwidth or transaction (Class B) cap exceeded.',
+        new Command('HeadObject'),
+        [
+            'code' => 'AccessDenied',
+            'message' => 'Cannot download file, download bandwidth or transaction (Class B) cap exceeded.',
+            'response' => new Response(403),
+        ],
+    );
+    $client = Mockery::mock(S3Client::class);
+    $client->shouldReceive('headObject')
+        ->once()
+        ->with(['Bucket' => 'test-bucket', 'Key' => 'objects/large-video.mp4'])
+        ->andThrow($providerException);
+
+    $service = new class($client) extends ObjectStorageService
+    {
+        public function __construct(private readonly S3Client $storageClient) {}
+
+        public function client(): S3Client
+        {
+            return $this->storageClient;
+        }
+
+        public function bucket(): string
+        {
+            return 'test-bucket';
+        }
+    };
+
+    try {
+        $service->ensureDownloadAvailable('objects/large-video.mp4');
+        test()->fail('Expected the download availability check to fail.');
+    } catch (DownloadUnavailableException $exception) {
+        expect($exception->userMessage())
+            ->toBe('Downloads are temporarily unavailable because the storage download limit has been reached. Please try again later or contact the link owner.')
+            ->and($exception->getPrevious())->toBe($providerException);
+    }
 });
 
 it('recovers multipart completion when the provider already created the object', function (): void {

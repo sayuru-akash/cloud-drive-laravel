@@ -5,6 +5,7 @@ use App\Enums\ResourceVisibility;
 use App\Enums\ShareMode;
 use App\Enums\ShareResourceType;
 use App\Enums\UploadStatus;
+use App\Exceptions\DownloadUnavailableException;
 use App\Models\AuditLog;
 use App\Models\DriveFile;
 use App\Models\FileVersion;
@@ -818,12 +819,124 @@ it('allows folder share downloads only for ready files inside the shared folder 
         ->once()
         ->with('objects/inside.txt', 'inside.txt')
         ->andReturn('https://storage.example/inside');
+    $storage->shouldReceive('ensureDownloadAvailable')
+        ->once()
+        ->with('objects/inside.txt');
 
     $this->get("/api/public-share/folder-token/files/{$inside->id}/download")
         ->assertRedirect('https://storage.example/inside');
 
     $this->get("/api/public-share/folder-token/files/{$outside->id}/download")
         ->assertNotFound();
+});
+
+it('returns folder share visitors to the file list when the storage download cap is exceeded', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Shared root',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $file = DriveFile::query()->create([
+        'folder_id' => $folder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'large-video.mp4',
+        'display_name' => 'large-video.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 250_000_000,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/large-video.mp4',
+        'size_bytes' => 250_000_000,
+        'mime_type' => 'video/mp4',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $file->update(['current_version_id' => $version->id]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::Folder,
+        'resource_id' => $folder->id,
+        'token_hash' => hash('sha256', 'folder-token'),
+        'token_encrypted' => 'folder-token',
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $storage->shouldReceive('ensureDownloadAvailable')
+        ->once()
+        ->with('objects/large-video.mp4')
+        ->andThrow(DownloadUnavailableException::capacityExceeded(new RuntimeException('Provider cap exceeded.')));
+    $storage->shouldNotReceive('createDownloadUrl');
+
+    $message = 'Downloads are temporarily unavailable because the storage download limit has been reached. Please try again later or contact the link owner.';
+
+    $this->get("/api/public-share/folder-token/files/{$file->id}/download")
+        ->assertRedirect("/s/folder-token?folder={$folder->id}")
+        ->assertSessionHas('downloadError', $message);
+
+    $this->get("/s/folder-token?folder={$folder->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('public/Share')
+            ->where('downloadError', $message)
+        );
+
+    expect(AuditLog::query()->where('action_type', 'file.downloaded')->exists())->toBeFalse();
+});
+
+it('returns authenticated users to their folder when storage cannot serve a download', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Videos',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $file = DriveFile::query()->create([
+        'folder_id' => $folder->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'video.mp4',
+        'display_name' => 'video.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 250_000_000,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $file->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/video.mp4',
+        'size_bytes' => 250_000_000,
+        'mime_type' => 'video/mp4',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $file->update(['current_version_id' => $version->id]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $storage->shouldReceive('ensureDownloadAvailable')
+        ->once()
+        ->with('objects/video.mp4')
+        ->andThrow(DownloadUnavailableException::temporary(new RuntimeException('Storage unavailable.')));
+    $storage->shouldNotReceive('createDownloadUrl');
+
+    $this->actingAs($owner)
+        ->get("/api/files/{$file->id}/download")
+        ->assertRedirect("/files?folder={$folder->id}")
+        ->assertSessionHas('error', 'The storage service could not prepare this download. Please try again shortly.');
+
+    expect(AuditLog::query()->where('action_type', 'file.downloaded')->exists())->toBeFalse();
 });
 
 it('downloads a folder share as a zip archive', function (): void {

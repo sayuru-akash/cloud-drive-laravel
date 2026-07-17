@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\DownloadUnavailableException;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 
@@ -164,13 +165,29 @@ class ObjectStorageService
         return (string) $this->client()->createPresignedRequest($command, '+5 minutes')->getUri();
     }
 
+    public function ensureDownloadAvailable(string $storageKey): void
+    {
+        try {
+            $this->client()->headObject([
+                'Bucket' => $this->bucket(),
+                'Key' => $storageKey,
+            ]);
+        } catch (S3Exception $exception) {
+            throw $this->downloadUnavailableException($exception);
+        }
+    }
+
     public function writeObjectToPath(string $storageKey, string $destination): void
     {
-        $this->client()->getObject([
-            'Bucket' => $this->bucket(),
-            'Key' => $storageKey,
-            'SaveAs' => $destination,
-        ]);
+        try {
+            $this->client()->getObject([
+                'Bucket' => $this->bucket(),
+                'Key' => $storageKey,
+                'SaveAs' => $destination,
+            ]);
+        } catch (S3Exception $exception) {
+            throw $this->downloadUnavailableException($exception);
+        }
     }
 
     public function downloadDisposition(?string $filename): string
@@ -185,5 +202,27 @@ class ObjectStorageService
         $encoded = rawurlencode($safeFilename ?: 'file');
 
         return "attachment; filename=\"{$fallback}\"; filename*=UTF-8''{$encoded}";
+    }
+
+    private function downloadUnavailableException(S3Exception $exception): DownloadUnavailableException
+    {
+        $errorDetails = strtolower(implode(' ', array_filter([
+            $exception->getAwsErrorCode(),
+            $exception->getAwsErrorMessage(),
+            $exception->getMessage(),
+        ])));
+
+        if (str_contains($errorDetails, 'cap exceeded')
+            || str_contains($errorDetails, 'download bandwidth')
+            || str_contains($errorDetails, 'class b')) {
+            return DownloadUnavailableException::capacityExceeded($exception);
+        }
+
+        if ($exception->getStatusCode() === 404
+            || in_array($exception->getAwsErrorCode(), ['NoSuchKey', 'NotFound'], true)) {
+            return DownloadUnavailableException::missing($exception);
+        }
+
+        return DownloadUnavailableException::temporary($exception);
     }
 }
