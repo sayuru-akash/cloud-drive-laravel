@@ -29,6 +29,8 @@ export type UploadQueueItem = {
 
 type QueueOptions = {
     folderId: string | null;
+    folderIdForFile?: (file: File) => string | null;
+    displayPathForFile?: (file: File) => string;
     maxUploadSizeBytes: number;
     blockedExtensions: string[];
     parallelFileUploads?: number;
@@ -597,7 +599,7 @@ function queueFiles(files: File[], options: QueueOptions): void {
         const error = validationError(file, options);
         uploads.value.push({
             id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
-            name: file.name,
+            name: options.displayPathForFile?.(file) ?? file.name,
             size: file.size,
             mimeType: file.type || null,
             uploadedBytes: 0,
@@ -605,7 +607,7 @@ function queueFiles(files: File[], options: QueueOptions): void {
             status: error ? 'error' : 'queued',
             message: error ?? 'Queued',
             file: markRaw(file),
-            folderId: options.folderId,
+            folderId: options.folderIdForFile?.(file) ?? options.folderId,
             partConcurrency: Math.max(1, options.parallelPartUploads ?? 2),
         });
     });

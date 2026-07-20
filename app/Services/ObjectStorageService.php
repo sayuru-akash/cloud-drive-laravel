@@ -165,6 +165,17 @@ class ObjectStorageService
         return (string) $this->client()->createPresignedRequest($command, '+5 minutes')->getUri();
     }
 
+    public function createPreviewUrl(string $storageKey, ?string $filename = null): string
+    {
+        $command = $this->client()->getCommand('GetObject', [
+            'Bucket' => $this->bucket(),
+            'Key' => $storageKey,
+            'ResponseContentDisposition' => $this->inlineDisposition($filename),
+        ]);
+
+        return (string) $this->client()->createPresignedRequest($command, '+60 minutes')->getUri();
+    }
+
     public function ensureDownloadAvailable(string $storageKey): void
     {
         try {
@@ -202,6 +213,11 @@ class ObjectStorageService
         $encoded = rawurlencode($safeFilename ?: 'file');
 
         return "attachment; filename=\"{$fallback}\"; filename*=UTF-8''{$encoded}";
+    }
+
+    public function inlineDisposition(?string $filename): string
+    {
+        return str_replace('attachment;', 'inline;', $this->downloadDisposition($filename));
     }
 
     private function downloadUnavailableException(S3Exception $exception): DownloadUnavailableException

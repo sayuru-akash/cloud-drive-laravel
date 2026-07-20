@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import BrandMark from '@/components/BrandMark.vue';
 import SeoHead from '@/components/SeoHead.vue';
 </script>
 
@@ -17,11 +17,7 @@ import SeoHead from '@/components/SeoHead.vue';
                 href="/"
                 class="inline-flex items-center gap-3 text-sm font-medium text-ink-950 dark:text-white"
             >
-                <span
-                    class="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-background shadow-sm ring-1 ring-line dark:bg-ink-950 dark:text-ink-950"
-                >
-                    <AppLogoIcon class="h-8 w-8" />
-                </span>
+                <BrandMark size="md" />
                 Cloud Drive
             </Link>
             <h1

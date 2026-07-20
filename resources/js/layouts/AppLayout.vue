@@ -11,8 +11,8 @@ import {
     Trash2,
 } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, onMounted } from 'vue';
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import BrandMark from '@/components/BrandMark.vue';
 import UploadProgressPanel from '@/components/cloud/UploadProgressPanel.vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { useUploadManager } from '@/composables/useUploadManager';
@@ -79,11 +79,7 @@ onBeforeUnmount(() => {
             >
                 <div class="flex items-center justify-between">
                     <Link href="/dashboard" class="flex items-center gap-3">
-                        <span
-                            class="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-background shadow-sm ring-1 ring-line dark:bg-ink-950 dark:text-ink-950"
-                        >
-                            <AppLogoIcon class="h-8 w-8" />
-                        </span>
+                        <BrandMark size="md" />
                         <span
                             class="text-sm font-semibold text-ink-950 dark:text-white"
                             >Cloud Drive</span
@@ -133,11 +129,7 @@ onBeforeUnmount(() => {
                 class="sticky top-4 hidden h-[calc(100vh-2rem)] w-72 shrink-0 flex-col rounded-[2rem] border border-line bg-white/78 p-5 shadow-[0_24px_80px_-52px_rgba(15,23,42,0.52)] backdrop-blur lg:flex dark:bg-white/10"
             >
                 <Link href="/dashboard" class="flex items-center gap-3">
-                    <span
-                        class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-background shadow-sm ring-1 ring-line dark:bg-ink-950 dark:text-ink-950"
-                    >
-                        <AppLogoIcon class="h-9 w-9" />
-                    </span>
+                    <BrandMark size="md" />
                     <span>
                         <span
                             class="block text-sm font-semibold text-ink-950 dark:text-white"

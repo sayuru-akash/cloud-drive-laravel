@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import { ArrowRight, Lock, ShieldCheck, UploadCloud } from 'lucide-vue-next';
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import BrandMark from '@/components/BrandMark.vue';
 import SeoHead from '@/components/SeoHead.vue';
 </script>
 
@@ -18,11 +18,7 @@ import SeoHead from '@/components/SeoHead.vue';
         <div class="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col">
             <header class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <span
-                        class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-background shadow-sm ring-1 ring-line dark:bg-ink-950 dark:text-ink-950"
-                    >
-                        <AppLogoIcon class="h-9 w-9" />
-                    </span>
+                    <BrandMark size="md" />
                     <span class="font-semibold">Cloud Drive</span>
                 </div>
                 <nav class="flex gap-2">

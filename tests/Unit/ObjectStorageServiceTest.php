@@ -21,6 +21,13 @@ it('builds safe attachment disposition headers', function (): void {
         ->toBe('attachment; filename="test__v2_.pdf"; filename*=UTF-8\'\'test%20%28v2%29.pdf');
 });
 
+it('builds safe inline preview disposition headers', function (): void {
+    $service = new ObjectStorageService;
+
+    expect($service->inlineDisposition('demo video.mp4'))
+        ->toBe('inline; filename="demo_video.mp4"; filename*=UTF-8\'\'demo%20video.mp4');
+});
+
 it('maps a Backblaze download cap response to a safe domain exception', function (): void {
     $providerException = new S3Exception(
         'Cannot download file, download bandwidth or transaction (Class B) cap exceeded.',

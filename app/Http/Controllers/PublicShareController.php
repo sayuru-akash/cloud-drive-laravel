@@ -10,6 +10,7 @@ use App\Models\Folder;
 use App\Models\ShareLink;
 use App\Services\AuditLogger;
 use App\Services\ObjectStorageService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
@@ -58,6 +59,7 @@ class PublicShareController extends Controller
                 'status' => $resolved['status'],
                 'resourceType' => ShareResourceType::File->value,
                 'file' => $file ? [
+                    'id' => $file->id,
                     'display_name' => $file->display_name,
                     'size_bytes' => $file->size_bytes,
                     'mime_type' => $file->mime_type,
@@ -208,6 +210,36 @@ class PublicShareController extends Controller
         return redirect()->away($storage->createDownloadUrl($file->currentVersion->storage_key, $file->display_name), 307);
     }
 
+    public function preview(string $token, ObjectStorageService $storage, AuditLogger $audit): JsonResponse
+    {
+        $share = $this->resolve($token)['share'];
+        abort_unless($share && $share->resource_type === ShareResourceType::File, 404);
+        $file = $share->file()->with('currentVersion')->firstOrFail();
+        abort_unless($this->isFileShareable($file), 404);
+
+        return $this->previewResponse($file, $storage, $audit, [
+            'publicShareId' => $share->id,
+        ]);
+    }
+
+    public function previewFile(string $token, string $file, ObjectStorageService $storage, AuditLogger $audit): JsonResponse
+    {
+        $share = $this->resolve($token)['share'];
+        abort_unless($share && $share->resource_type === ShareResourceType::Folder, 404);
+        $root = $share->folder;
+        abort_unless($root && ! $root->is_deleted, 404);
+        $file = DriveFile::query()
+            ->with('currentVersion')
+            ->whereIn('folder_id', $this->availableFolderIds($root))
+            ->findOrFail($file);
+        abort_unless($this->isFileShareable($file), 404);
+
+        return $this->previewResponse($file, $storage, $audit, [
+            'publicShareId' => $share->id,
+            'folderShareId' => $root->id,
+        ]);
+    }
+
     private function downloadFailureRedirect(string $token, DownloadUnavailableException $exception, ?string $folderId = null): RedirectResponse
     {
         report($exception);
@@ -218,6 +250,28 @@ class PublicShareController extends Controller
                 'folder' => $folderId,
             ]))
             ->with('downloadError', $exception->userMessage());
+    }
+
+    /** @param array<string, string> $metadata */
+    private function previewResponse(DriveFile $file, ObjectStorageService $storage, AuditLogger $audit, array $metadata): JsonResponse
+    {
+        abort_unless(str_starts_with(strtolower($file->mime_type), 'video/'), 422, 'Only video files can be previewed.');
+        abort_unless($storage->isConfigured(), 503, 'Object storage is not configured.');
+
+        try {
+            $storage->ensureDownloadAvailable($file->currentVersion->storage_key);
+        } catch (DownloadUnavailableException $exception) {
+            report($exception);
+
+            return response()->json(['message' => $exception->userMessage()], 503);
+        }
+
+        $audit->log('file.preview.opened', 'file', $file->id, $metadata, request());
+
+        return response()->json([
+            'url' => $storage->createPreviewUrl($file->currentVersion->storage_key, $file->display_name),
+            'expiresIn' => 3600,
+        ]);
     }
 
     /** @return array{share:?ShareLink,status:string} */

@@ -6,9 +6,11 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeletedController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\FileDownloadController;
+use App\Http\Controllers\FilePreviewController;
 use App\Http\Controllers\FilesController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FolderController;
+use App\Http\Controllers\FolderUploadController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\PublicShareController;
 use App\Http\Controllers\ShareLinkController;
@@ -40,12 +42,15 @@ Route::inertia('/', 'Welcome')->name('home');
 Route::inertia('/privacy', 'public/Privacy')->name('privacy');
 Route::get('/s/{token}', [PublicShareController::class, 'show'])->name('public-share.show');
 Route::get('/api/public-share/{token}/download', [PublicShareController::class, 'download'])->name('public-share.download');
+Route::get('/api/public-share/{token}/preview', [PublicShareController::class, 'preview'])->name('public-share.preview');
 Route::get('/api/public-share/{token}/files/{file}/download', [PublicShareController::class, 'downloadFile'])->name('public-share.files.download');
+Route::get('/api/public-share/{token}/files/{file}/preview', [PublicShareController::class, 'previewFile'])->name('public-share.files.preview');
 
 Route::middleware(['auth', 'verified', 'active'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
     Route::get('files', [FilesController::class, 'index'])->name('files.index');
     Route::post('folders', [FolderController::class, 'store'])->name('folders.store');
+    Route::post('/api/folders/upload-tree', FolderUploadController::class)->name('api.folders.upload-tree');
     Route::patch('folders/{folder}', [FolderController::class, 'update'])->name('folders.update');
     Route::delete('folders/{folder}', [FolderController::class, 'destroy'])->name('folders.destroy');
     Route::patch('files/{file}', [FileController::class, 'update'])->name('files.update');
@@ -65,6 +70,7 @@ Route::middleware(['auth', 'verified', 'active'])->group(function () {
     Route::post('/api/files/{file}/complete-upload', [FileUploadController::class, 'complete'])->name('api.files.complete-upload');
     Route::post('/api/files/{file}/cancel-upload', [FileUploadController::class, 'cancel'])->name('api.files.cancel-upload');
     Route::get('/api/files/{file}/download', FileDownloadController::class)->name('api.files.download');
+    Route::get('/api/files/{file}/preview', FilePreviewController::class)->name('api.files.preview');
 
     Route::middleware('admin')->group(function () {
         Route::get('admin', [AdminController::class, 'index'])->name('admin.index');

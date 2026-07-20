@@ -43,6 +43,77 @@ it('blocks moving a file into a folder the user cannot manage', function (): voi
     expect($file->fresh()->folder_id)->toBeNull();
 });
 
+it('prepares a collision-safe nested folder tree for direct browser uploads', function (): void {
+    $owner = User::factory()->create();
+    Folder::query()->create([
+        'name' => 'Campaign',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $response = $this->actingAs($owner)
+        ->postJson('/api/folders/upload-tree', [
+            'paths' => [
+                'Campaign',
+                'Campaign/Video',
+                'Campaign/Video/Exports',
+                'Campaign/Documents',
+            ],
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('folderCount', 4);
+
+    $folderIds = $response->json('folders');
+    $root = Folder::query()->findOrFail($folderIds['Campaign']);
+    $video = Folder::query()->findOrFail($folderIds['Campaign/Video']);
+    $exports = Folder::query()->findOrFail($folderIds['Campaign/Video/Exports']);
+    $documents = Folder::query()->findOrFail($folderIds['Campaign/Documents']);
+
+    expect($root->name)->toBe('Campaign (1)')
+        ->and($root->parent_folder_id)->toBeNull()
+        ->and($root->owner_user_id)->toBe($owner->id)
+        ->and($root->visibility)->toBe(ResourceVisibility::Private)
+        ->and($video->parent_folder_id)->toBe($root->id)
+        ->and($exports->parent_folder_id)->toBe($video->id)
+        ->and($documents->parent_folder_id)->toBe($root->id)
+        ->and(AuditLog::query()->where('action_type', 'folder.upload_tree.created')->exists())->toBeTrue();
+});
+
+it('rejects folder upload trees outside manageable locations or with unsafe paths', function (): void {
+    $member = User::factory()->create();
+    $other = User::factory()->create();
+    $privateParent = Folder::query()->create([
+        'name' => 'Private destination',
+        'owner_user_id' => $other->id,
+        'created_by_user_id' => $other->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($member)
+        ->postJson('/api/folders/upload-tree', [
+            'parent_folder_id' => $privateParent->id,
+            'paths' => ['Selected folder'],
+        ])
+        ->assertForbidden();
+
+    $this->actingAs($member)
+        ->postJson('/api/folders/upload-tree', [
+            'paths' => ['Selected folder/../Outside'],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'A selected folder contains an unsupported name.');
+
+    $this->actingAs($member)
+        ->postJson('/api/folders/upload-tree', [
+            'paths' => [implode('/', array_fill(0, 33, 'Nested'))],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'A selected folder path is empty or too deeply nested.');
+
+    expect(Folder::query()->where('owner_user_id', $member->id)->exists())->toBeFalse();
+});
+
 it('marks workspace-visible resources as view only for non owners on the files page', function (): void {
     $member = User::factory()->create();
     $other = User::factory()->create();
@@ -830,6 +901,56 @@ it('allows folder share downloads only for ready files inside the shared folder 
         ->assertNotFound();
 });
 
+it('previews a shared video through an active public token without exposing storage metadata', function (): void {
+    $owner = User::factory()->create();
+    $video = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'shared-video.mp4',
+        'display_name' => 'shared-video.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 20_000_000,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $video->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/shared-video.mp4',
+        'size_bytes' => 20_000_000,
+        'mime_type' => 'video/mp4',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $video->update(['current_version_id' => $version->id]);
+    ShareLink::query()->create([
+        'resource_type' => ShareResourceType::File,
+        'resource_id' => $video->id,
+        'token_hash' => hash('sha256', 'video-token'),
+        'token_encrypted' => 'video-token',
+        'created_by_user_id' => $owner->id,
+        'mode' => ShareMode::Download,
+        'expires_at' => now()->addDay(),
+    ]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $storage->shouldReceive('ensureDownloadAvailable')->once()->with('objects/shared-video.mp4');
+    $storage->shouldReceive('createPreviewUrl')
+        ->once()
+        ->with('objects/shared-video.mp4', 'shared-video.mp4')
+        ->andReturn('https://storage.example/shared-video');
+
+    $this->getJson('/api/public-share/video-token/preview')
+        ->assertSuccessful()
+        ->assertExactJson([
+            'url' => 'https://storage.example/shared-video',
+            'expiresIn' => 3600,
+        ]);
+
+    expect(AuditLog::query()->where('action_type', 'file.preview.opened')->exists())->toBeTrue();
+});
+
 it('returns folder share visitors to the file list when the storage download cap is exceeded', function (): void {
     $owner = User::factory()->create();
     $folder = Folder::query()->create([
@@ -937,6 +1058,72 @@ it('returns authenticated users to their folder when storage cannot serve a down
         ->assertSessionHas('error', 'The storage service could not prepare this download. Please try again shortly.');
 
     expect(AuditLog::query()->where('action_type', 'file.downloaded')->exists())->toBeFalse();
+});
+
+it('returns an authorized short-lived preview URL only for ready video files', function (): void {
+    $owner = User::factory()->create();
+    $video = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'preview.mp4',
+        'display_name' => 'preview.mp4',
+        'mime_type' => 'video/mp4',
+        'size_bytes' => 50_000_000,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $version = FileVersion::query()->create([
+        'file_id' => $video->id,
+        'version_number' => 1,
+        'storage_bucket' => 'test-bucket',
+        'storage_key' => 'objects/preview.mp4',
+        'size_bytes' => 50_000_000,
+        'mime_type' => 'video/mp4',
+        'uploaded_by_user_id' => $owner->id,
+    ]);
+    $video->update(['current_version_id' => $version->id]);
+
+    $storage = $this->mock(ObjectStorageService::class);
+    $storage->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $storage->shouldReceive('ensureDownloadAvailable')->once()->with('objects/preview.mp4');
+    $storage->shouldReceive('createPreviewUrl')
+        ->once()
+        ->with('objects/preview.mp4', 'preview.mp4')
+        ->andReturn('https://storage.example/preview');
+
+    $this->actingAs($owner)
+        ->getJson("/api/files/{$video->id}/preview")
+        ->assertSuccessful()
+        ->assertJson([
+            'url' => 'https://storage.example/preview',
+            'expiresIn' => 3600,
+        ]);
+
+    expect(AuditLog::query()->where('action_type', 'file.preview.opened')->exists())->toBeTrue();
+});
+
+it('rejects private or non-video preview requests before signing storage access', function (): void {
+    $owner = User::factory()->create();
+    $other = User::factory()->create();
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'document.pdf',
+        'display_name' => 'document.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 500,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($other)
+        ->getJson("/api/files/{$file->id}/preview")
+        ->assertForbidden();
+
+    $this->actingAs($owner)
+        ->getJson("/api/files/{$file->id}/preview")
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Only video files can be previewed.');
 });
 
 it('downloads a folder share as a zip archive', function (): void {

@@ -8,10 +8,13 @@ import {
     Download,
     FileUp,
     Folder,
+    FolderUp,
     Grid2X2,
     List,
+    LoaderCircle,
     MoreHorizontal,
     Pencil,
+    Play,
     Plus,
     Search,
     Share2,
@@ -19,6 +22,7 @@ import {
     Users,
 } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { toast } from 'vue-sonner';
 import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import PageHeader from '@/components/cloud/PageHeader.vue';
 import PaginationLinks from '@/components/cloud/PaginationLinks.vue';
@@ -102,7 +106,10 @@ const view = ref(localStorage.getItem('cloud-drive-view') || 'list');
 const dragging = ref(false);
 const createFolderOpen = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+const folderInput = ref<HTMLInputElement | null>(null);
+const folderPreparing = ref(false);
 const shareCopyState = ref<'idle' | 'copied' | 'failed'>('idle');
+const createdShareUrl = ref<string | null>(null);
 const renameTarget = ref<RenameTarget | null>(null);
 const renameValue = ref('');
 const trashTarget = ref<TrashTarget | null>(null);
@@ -110,6 +117,11 @@ const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
 const accessValue = ref('private');
 const accessProcessing = ref(false);
+const previewTarget = ref<FileItem | null>(null);
+const previewUrl = ref<string | null>(null);
+const previewLoading = ref(false);
+const previewError = ref<string | null>(null);
+const previewVideo = ref<HTMLVideoElement | null>(null);
 const { queueFiles } = useUploadManager();
 const driveRefreshProps = [
     'files',
@@ -155,7 +167,6 @@ const activeFilters = computed(
 );
 const folderItems = computed(() => props.folders.data);
 const fileItems = computed(() => props.files.data);
-const flash = computed(() => page.props.flash ?? {});
 const renameTitle = computed(
     () => `Rename ${renameTarget.value?.kind === 'folder' ? 'folder' : 'file'}`,
 );
@@ -263,6 +274,14 @@ function openFilePicker() {
     }
 
     fileInput.value?.click();
+}
+
+function openFolderPicker() {
+    if (!props.canManageCurrentLocation || folderPreparing.value) {
+        return;
+    }
+
+    folderInput.value?.click();
 }
 
 function openCreateFolderDialog() {
@@ -428,13 +447,21 @@ function submitAccess() {
 
 function createShare(target: ShareTarget) {
     shareTarget.value = target;
+    createdShareUrl.value = null;
+    shareCopyState.value = 'idle';
     shareForm.expires_days = props.settings.shareExpiryDays ?? 7;
     shareForm.mode = 'download';
     shareForm.clearErrors();
 }
 
 function closeShareDialog() {
+    if (shareForm.processing) {
+        return;
+    }
+
     shareTarget.value = null;
+    createdShareUrl.value = null;
+    shareCopyState.value = 'idle';
     shareForm.clearErrors();
 }
 
@@ -451,21 +478,137 @@ function submitShare() {
     shareForm.post(url, {
         only: ['flash'],
         preserveScroll: true,
-        onSuccess: closeShareDialog,
+        onSuccess: () => {
+            createdShareUrl.value = page.props.flash?.shareUrl ?? null;
+        },
     });
 }
 
 async function copyShareUrl() {
-    if (!flash.value.shareUrl) {
+    if (!createdShareUrl.value) {
         return;
     }
 
-    shareCopyState.value = (await copyTextToClipboard(flash.value.shareUrl))
+    shareCopyState.value = (await copyTextToClipboard(createdShareUrl.value))
         ? 'copied'
         : 'failed';
     window.setTimeout(() => {
         shareCopyState.value = 'idle';
     }, 4000);
+}
+
+function csrfToken(): string {
+    return (
+        document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')
+            ?.content ?? ''
+    );
+}
+
+function relativePath(file: File): string {
+    return (
+        (
+            file as File & {
+                webkitRelativePath?: string;
+            }
+        ).webkitRelativePath?.replace(/^\/+/, '') ?? ''
+    );
+}
+
+function directoryPath(file: File): string {
+    const segments = relativePath(file).split('/');
+
+    return segments.slice(0, -1).join('/');
+}
+
+async function uploadFolderFiles(list: FileList): Promise<void> {
+    if (!props.canManageCurrentLocation || folderPreparing.value) {
+        return;
+    }
+
+    const files = Array.from(list);
+
+    if (files.length === 0) {
+        toast.info('The selected folder does not contain uploadable files.');
+
+        return;
+    }
+
+    const folderPaths = new Set<string>();
+
+    for (const file of files) {
+        const path = relativePath(file);
+        const segments = path.split('/');
+
+        if (!path || segments.length < 2) {
+            toast.error('The browser did not provide this folder structure.');
+
+            return;
+        }
+
+        for (let index = 1; index < segments.length; index += 1) {
+            folderPaths.add(segments.slice(0, index).join('/'));
+        }
+    }
+
+    folderPreparing.value = true;
+
+    try {
+        const response = await fetch('/api/folders/upload-tree', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({
+                parent_folder_id: props.folderId,
+                paths: Array.from(folderPaths),
+            }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+            folders?: Record<string, string>;
+            folderCount?: number;
+            message?: string;
+        } | null;
+
+        if (!response.ok || !body?.folders) {
+            throw new Error(
+                body?.message ?? 'The selected folder could not be prepared.',
+            );
+        }
+
+        const missingDestination = files.some(
+            (file) => !body.folders?.[directoryPath(file)],
+        );
+
+        if (missingDestination) {
+            throw new Error(
+                'A nested upload destination could not be created.',
+            );
+        }
+
+        queueFiles(files, {
+            folderId: props.folderId,
+            folderIdForFile: (file) =>
+                body.folders?.[directoryPath(file)] ?? null,
+            displayPathForFile: relativePath,
+            maxUploadSizeBytes: props.settings.maxUploadSizeBytes,
+            blockedExtensions: props.settings.blockedExtensions,
+            parallelFileUploads: props.settings.parallelFileUploads,
+            parallelPartUploads: props.settings.parallelPartUploads,
+        });
+        toast.success(
+            `${body.folderCount ?? folderPaths.size} folder${(body.folderCount ?? folderPaths.size) === 1 ? '' : 's'} prepared. Uploads have started.`,
+        );
+        revalidateDrive(true);
+    } catch (error) {
+        toast.error(
+            error instanceof Error
+                ? error.message
+                : 'The selected folder could not be prepared.',
+        );
+    } finally {
+        folderPreparing.value = false;
+    }
 }
 
 function uploadFiles(list: FileList) {
@@ -497,6 +640,72 @@ function handleInput(event: Event) {
         uploadFiles(input.files);
         input.value = '';
     }
+}
+
+function handleFolderInput(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+
+    if (input?.files) {
+        void uploadFolderFiles(input.files);
+        input.value = '';
+    }
+}
+
+async function openVideoPreview(file: FileItem): Promise<void> {
+    if (!file.mime_type.toLowerCase().startsWith('video/')) {
+        return;
+    }
+
+    previewTarget.value = file;
+    previewUrl.value = null;
+    previewError.value = null;
+    previewLoading.value = true;
+
+    try {
+        const response = await fetch(`/api/files/${file.id}/preview`, {
+            headers: { Accept: 'application/json' },
+        });
+        const body = (await response.json().catch(() => null)) as {
+            url?: string;
+            message?: string;
+        } | null;
+
+        if (!response.ok || !body?.url) {
+            throw new Error(
+                body?.message ?? 'This video preview could not be prepared.',
+            );
+        }
+
+        if (previewTarget.value?.id === file.id) {
+            previewUrl.value = body.url;
+        }
+    } catch (error) {
+        previewError.value =
+            error instanceof Error
+                ? error.message
+                : 'This video preview could not be prepared.';
+    } finally {
+        previewLoading.value = false;
+    }
+}
+
+function closeVideoPreview() {
+    previewVideo.value?.pause();
+
+    if (previewVideo.value) {
+        previewVideo.value.removeAttribute('src');
+        previewVideo.value.load();
+    }
+
+    previewTarget.value = null;
+    previewUrl.value = null;
+    previewError.value = null;
+    previewLoading.value = false;
+}
+
+function markPreviewPlaybackError() {
+    previewError.value =
+        'This browser could not play the video format, or the storage connection was interrupted.';
 }
 
 function refreshAfterUploadChange() {
@@ -595,6 +804,21 @@ watch(
                             <FileUp class="h-4 w-4" />
                             Select files
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                            :disabled="folderPreparing"
+                            @select="openFolderPicker"
+                        >
+                            <LoaderCircle
+                                v-if="folderPreparing"
+                                class="h-4 w-4 animate-spin"
+                            />
+                            <FolderUp v-else class="h-4 w-4" />
+                            {{
+                                folderPreparing
+                                    ? 'Preparing folder'
+                                    : 'Select folder'
+                            }}
+                        </DropdownMenuItem>
                         <DropdownMenuItem @select="openCreateFolderDialog">
                             <Folder class="h-4 w-4" />
                             Create folder
@@ -609,6 +833,14 @@ watch(
             multiple
             class="hidden"
             @change="handleInput"
+        />
+        <input
+            ref="folderInput"
+            type="file"
+            multiple
+            webkitdirectory
+            class="hidden"
+            @change="handleFolderInput"
         />
 
         <section class="cloud-panel p-4 md:p-5">
@@ -729,80 +961,6 @@ watch(
         </section>
 
         <section
-            v-if="flash.shareUrl"
-            class="cloud-panel flex flex-col gap-4 p-4 text-sm md:flex-row md:items-center md:justify-between"
-        >
-            <div class="min-w-0">
-                <p class="font-semibold text-ink-950 dark:text-white">
-                    Share link ready
-                </p>
-                <a
-                    class="mt-1 block min-w-0 truncate font-medium text-brand"
-                    :href="flash.shareUrl"
-                    target="_blank"
-                    rel="noreferrer"
-                    >{{ flash.shareUrl }}</a
-                >
-            </div>
-            <div class="flex flex-col items-start gap-2 md:items-end">
-                <div class="flex flex-wrap gap-2">
-                    <a
-                        :href="flash.shareUrl"
-                        target="_blank"
-                        rel="noreferrer"
-                        class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
-                    >
-                        Open
-                    </a>
-                    <button
-                        type="button"
-                        class="cloud-button transition"
-                        :class="
-                            shareCopyState === 'copied'
-                                ? 'bg-emerald-600 text-white'
-                                : shareCopyState === 'failed'
-                                  ? 'bg-red-600 text-white'
-                                  : 'bg-ink-950 text-white dark:bg-white dark:text-ink-950'
-                        "
-                        @click="copyShareUrl"
-                    >
-                        <Check
-                            v-if="shareCopyState === 'copied'"
-                            class="h-4 w-4"
-                        />
-                        <AlertCircle
-                            v-else-if="shareCopyState === 'failed'"
-                            class="h-4 w-4"
-                        />
-                        <Copy v-else class="h-4 w-4" />
-                        {{
-                            shareCopyState === 'copied'
-                                ? 'Copied'
-                                : shareCopyState === 'failed'
-                                  ? 'Copy failed'
-                                  : 'Copy link'
-                        }}
-                    </button>
-                </div>
-                <p
-                    v-if="shareCopyState !== 'idle'"
-                    class="text-xs font-medium"
-                    :class="
-                        shareCopyState === 'copied'
-                            ? 'text-emerald-700 dark:text-emerald-300'
-                            : 'text-red-600 dark:text-red-300'
-                    "
-                >
-                    {{
-                        shareCopyState === 'copied'
-                            ? 'Copied to clipboard.'
-                            : 'Your browser blocked clipboard access.'
-                    }}
-                </p>
-            </div>
-        </section>
-
-        <section
             class="cloud-panel p-4 md:p-5"
             :class="
                 dragging
@@ -906,6 +1064,19 @@ watch(
                             :mime-type="file.mime_type"
                         />
                         <div class="flex items-center gap-1">
+                            <button
+                                v-if="
+                                    file.mime_type
+                                        .toLowerCase()
+                                        .startsWith('video/')
+                                "
+                                type="button"
+                                class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                                title="Preview video"
+                                @click="openVideoPreview(file)"
+                            >
+                                <Play class="h-4 w-4" />
+                            </button>
                             <a
                                 class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                                 title="Download"
@@ -1092,6 +1263,19 @@ watch(
                     }}</span>
                     <StatusBadge :value="file.visibility" />
                     <div class="flex items-center gap-1 md:justify-end">
+                        <button
+                            v-if="
+                                file.mime_type
+                                    .toLowerCase()
+                                    .startsWith('video/')
+                            "
+                            type="button"
+                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                            title="Preview video"
+                            @click="openVideoPreview(file)"
+                        >
+                            <Play class="h-4 w-4" />
+                        </button>
                         <a
                             class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
                             title="Download"
@@ -1414,13 +1598,84 @@ watch(
         </Dialog>
 
         <Dialog
+            :open="previewTarget !== null"
+            @update:open="($event) => !$event && closeVideoPreview()"
+        >
+            <DialogContent class="overflow-hidden p-0 sm:max-w-4xl">
+                <DialogHeader class="px-6 pt-6 pr-14">
+                    <DialogTitle>Video preview</DialogTitle>
+                    <DialogDescription class="truncate">
+                        {{ previewTarget?.display_name }}
+                    </DialogDescription>
+                </DialogHeader>
+                <div
+                    class="mx-4 mb-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black sm:mx-6"
+                >
+                    <div
+                        v-if="previewLoading"
+                        class="flex flex-col items-center gap-3 text-sm text-white/75"
+                    >
+                        <LoaderCircle class="h-6 w-6 animate-spin" />
+                        Preparing secure preview
+                    </div>
+                    <div
+                        v-else-if="previewError"
+                        role="alert"
+                        class="max-w-md px-6 text-center text-sm text-white/80"
+                    >
+                        <AlertCircle
+                            class="mx-auto mb-3 h-7 w-7 text-amber-300"
+                        />
+                        {{ previewError }}
+                    </div>
+                    <video
+                        v-else-if="previewUrl"
+                        ref="previewVideo"
+                        :key="previewUrl"
+                        :src="previewUrl"
+                        class="h-full w-full bg-black object-contain"
+                        controls
+                        playsinline
+                        preload="metadata"
+                        @error="markPreviewPlaybackError"
+                    >
+                        This browser cannot play the selected video.
+                    </video>
+                </div>
+                <DialogFooter class="gap-2 px-6 pb-6 sm:gap-2">
+                    <button
+                        type="button"
+                        class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                        @click="closeVideoPreview"
+                    >
+                        Close
+                    </button>
+                    <a
+                        v-if="previewTarget"
+                        class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                        :href="`/api/files/${previewTarget.id}/download`"
+                    >
+                        <Download class="h-4 w-4" />
+                        Download
+                    </a>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog
             :open="shareTarget !== null"
             @update:open="($event) => !$event && closeShareDialog()"
         >
             <DialogContent class="sm:max-w-lg">
                 <form class="space-y-5" @submit.prevent="submitShare">
                     <DialogHeader>
-                        <DialogTitle>Create share link</DialogTitle>
+                        <DialogTitle>
+                            {{
+                                createdShareUrl
+                                    ? 'Share link ready'
+                                    : 'Create share link'
+                            }}
+                        </DialogTitle>
                         <DialogDescription>
                             {{
                                 shareTarget?.kind === 'file'
@@ -1429,71 +1684,152 @@ watch(
                             }}
                         </DialogDescription>
                     </DialogHeader>
-                    <div class="grid gap-3 sm:grid-cols-3">
-                        <button
-                            v-for="days in [1, 7, 30]"
-                            :key="days"
-                            type="button"
-                            class="rounded-2xl border px-4 py-3 text-left text-sm transition"
-                            :class="
-                                shareForm.expires_days === days
-                                    ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
-                                    : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
-                            "
-                            @click="shareForm.expires_days = days"
-                        >
-                            <span class="block font-semibold"
-                                >{{ days }} day{{ days === 1 ? '' : 's' }}</span
-                            >
-                            <span class="text-xs text-ink-600 dark:text-ink-300"
-                                >Expires automatically</span
-                            >
-                        </button>
-                    </div>
-                    <label class="block space-y-2 text-sm font-medium">
-                        <span>Custom expiry in days</span>
-                        <input
-                            v-model.number="shareForm.expires_days"
-                            type="number"
-                            min="1"
-                            max="90"
-                            class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm transition outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
-                        />
-                        <span
-                            v-if="shareForm.errors.expires_days"
-                            class="text-xs text-red-600"
-                            >{{ shareForm.errors.expires_days }}</span
-                        >
-                    </label>
                     <div
-                        class="rounded-2xl border border-line bg-white/70 p-4 text-sm dark:bg-white/10"
+                        v-if="createdShareUrl"
+                        class="space-y-3 rounded-2xl border border-line bg-white/70 p-4 dark:bg-white/10"
                     >
-                        <div class="flex items-center justify-between gap-4">
-                            <span>
-                                <span
-                                    class="block font-semibold text-ink-950 dark:text-white"
-                                    >Download access</span
-                                >
-                                <span class="text-ink-600 dark:text-ink-300">
-                                    {{
-                                        shareTarget?.kind === 'folder'
-                                            ? 'Recipients can open this folder view and download ready files until the link expires or is revoked.'
-                                            : 'Recipients can download this ready file until the link expires or is revoked.'
-                                    }}
-                                </span>
-                            </span>
-                            <StatusBadge value="active" />
+                        <p class="text-sm text-ink-600 dark:text-ink-300">
+                            Anyone with this link can download the shared item
+                            until it expires or is revoked.
+                        </p>
+                        <a
+                            :href="createdShareUrl"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="block truncate rounded-xl border border-line bg-background px-3 py-2 text-sm font-medium text-brand"
+                        >
+                            {{ createdShareUrl }}
+                        </a>
+                        <div class="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                class="cloud-button transition"
+                                :class="
+                                    shareCopyState === 'copied'
+                                        ? 'bg-emerald-600 text-white'
+                                        : shareCopyState === 'failed'
+                                          ? 'bg-red-600 text-white'
+                                          : 'bg-ink-950 text-white dark:bg-white dark:text-ink-950'
+                                "
+                                @click="copyShareUrl"
+                            >
+                                <Check
+                                    v-if="shareCopyState === 'copied'"
+                                    class="h-4 w-4"
+                                />
+                                <AlertCircle
+                                    v-else-if="shareCopyState === 'failed'"
+                                    class="h-4 w-4"
+                                />
+                                <Copy v-else class="h-4 w-4" />
+                                {{
+                                    shareCopyState === 'copied'
+                                        ? 'Copied'
+                                        : shareCopyState === 'failed'
+                                          ? 'Copy failed'
+                                          : 'Copy link'
+                                }}
+                            </button>
+                            <a
+                                :href="createdShareUrl"
+                                target="_blank"
+                                rel="noreferrer"
+                                class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                            >
+                                Open link
+                            </a>
                         </div>
+                        <p
+                            v-if="shareCopyState !== 'idle'"
+                            class="text-xs font-medium"
+                            :class="
+                                shareCopyState === 'copied'
+                                    ? 'text-emerald-700 dark:text-emerald-300'
+                                    : 'text-red-600 dark:text-red-300'
+                            "
+                        >
+                            {{
+                                shareCopyState === 'copied'
+                                    ? 'Copied to clipboard.'
+                                    : 'Your browser blocked clipboard access.'
+                            }}
+                        </p>
                     </div>
+                    <template v-else>
+                        <div class="grid gap-3 sm:grid-cols-3">
+                            <button
+                                v-for="days in [1, 7, 30]"
+                                :key="days"
+                                type="button"
+                                class="rounded-2xl border px-4 py-3 text-left text-sm transition"
+                                :class="
+                                    shareForm.expires_days === days
+                                        ? 'border-brand bg-brand/10 text-ink-950 dark:text-white'
+                                        : 'dark:text-ink-200 border-line bg-white/70 text-ink-700 dark:bg-white/10'
+                                "
+                                @click="shareForm.expires_days = days"
+                            >
+                                <span class="block font-semibold"
+                                    >{{ days }} day{{
+                                        days === 1 ? '' : 's'
+                                    }}</span
+                                >
+                                <span
+                                    class="text-xs text-ink-600 dark:text-ink-300"
+                                    >Expires automatically</span
+                                >
+                            </button>
+                        </div>
+                        <label class="block space-y-2 text-sm font-medium">
+                            <span>Custom expiry in days</span>
+                            <input
+                                v-model.number="shareForm.expires_days"
+                                type="number"
+                                min="1"
+                                max="90"
+                                class="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm transition outline-none focus:border-brand focus:ring-4 focus:ring-brand/15 dark:bg-white/10"
+                            />
+                            <span
+                                v-if="shareForm.errors.expires_days"
+                                class="text-xs text-red-600"
+                                >{{ shareForm.errors.expires_days }}</span
+                            >
+                        </label>
+                        <div
+                            class="rounded-2xl border border-line bg-white/70 p-4 text-sm dark:bg-white/10"
+                        >
+                            <div
+                                class="flex items-center justify-between gap-4"
+                            >
+                                <span>
+                                    <span
+                                        class="block font-semibold text-ink-950 dark:text-white"
+                                        >Download access</span
+                                    >
+                                    <span
+                                        class="text-ink-600 dark:text-ink-300"
+                                    >
+                                        {{
+                                            shareTarget?.kind === 'folder'
+                                                ? 'Recipients can open this folder view and download ready files until the link expires or is revoked.'
+                                                : 'Recipients can download this ready file until the link expires or is revoked.'
+                                        }}
+                                    </span>
+                                </span>
+                                <StatusBadge value="active" />
+                            </div>
+                        </div>
+                    </template>
                     <DialogFooter class="gap-2 sm:gap-2">
                         <button
                             type="button"
                             class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
                             @click="closeShareDialog"
                         >
-                            Cancel
+                            {{ createdShareUrl ? 'Done' : 'Cancel' }}
                         </button>
                         <button
+                            v-if="!createdShareUrl"
                             type="submit"
                             class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
                             :disabled="shareForm.processing"

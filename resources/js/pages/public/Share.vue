@@ -1,11 +1,27 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { AlertTriangle, Download, Folder, Home } from 'lucide-vue-next';
-import { computed } from 'vue';
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
+import {
+    AlertCircle,
+    AlertTriangle,
+    Download,
+    Folder,
+    Home,
+    LoaderCircle,
+    Play,
+} from 'lucide-vue-next';
+import { computed, ref } from 'vue';
 import BrandFooter from '@/components/BrandFooter.vue';
+import BrandMark from '@/components/BrandMark.vue';
 import FileTypeIcon from '@/components/cloud/FileTypeIcon.vue';
 import SeoHead from '@/components/SeoHead.vue';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { formatFileType } from '@/lib/file-types';
 import { formatBytes, formatDate } from '@/lib/format';
 
@@ -45,6 +61,11 @@ const props = defineProps<{
     } | null;
     downloadError: string | null;
 }>();
+const previewTarget = ref<PublicFile | null>(null);
+const previewUrl = ref<string | null>(null);
+const previewLoading = ref(false);
+const previewError = ref<string | null>(null);
+const previewVideo = ref<HTMLVideoElement | null>(null);
 
 const unavailableMessage = computed(() => {
     switch (props.status) {
@@ -86,6 +107,73 @@ function fileDownloadUrl(fileId: string) {
         ? `${props.fileDownloadBaseUrl}/${fileId}/download`
         : '#';
 }
+
+function isVideo(file: PublicFile): boolean {
+    return file.mime_type?.toLowerCase().startsWith('video/') ?? false;
+}
+
+function previewEndpoint(file: PublicFile): string {
+    return props.resourceType === 'file'
+        ? `/api/public-share/${token.value}/preview`
+        : `/api/public-share/${token.value}/files/${file.id}/preview`;
+}
+
+async function openVideoPreview(file: PublicFile): Promise<void> {
+    if (!isVideo(file)) {
+        return;
+    }
+
+    previewTarget.value = file;
+    previewUrl.value = null;
+    previewError.value = null;
+    previewLoading.value = true;
+
+    try {
+        const response = await fetch(previewEndpoint(file), {
+            headers: { Accept: 'application/json' },
+        });
+        const body = (await response.json().catch(() => null)) as {
+            url?: string;
+            message?: string;
+        } | null;
+
+        if (!response.ok || !body?.url) {
+            throw new Error(
+                body?.message ?? 'This video preview could not be prepared.',
+            );
+        }
+
+        if (previewTarget.value?.id === file.id) {
+            previewUrl.value = body.url;
+        }
+    } catch (error) {
+        previewError.value =
+            error instanceof Error
+                ? error.message
+                : 'This video preview could not be prepared.';
+    } finally {
+        previewLoading.value = false;
+    }
+}
+
+function closeVideoPreview() {
+    previewVideo.value?.pause();
+
+    if (previewVideo.value) {
+        previewVideo.value.removeAttribute('src');
+        previewVideo.value.load();
+    }
+
+    previewTarget.value = null;
+    previewUrl.value = null;
+    previewError.value = null;
+    previewLoading.value = false;
+}
+
+function markPreviewPlaybackError() {
+    previewError.value =
+        'This browser could not play the video format, or the storage connection was interrupted.';
+}
 </script>
 
 <template>
@@ -100,11 +188,7 @@ function fileDownloadUrl(fileId: string) {
                 class="shadow-soft flex flex-col gap-4 rounded-[1.75rem] border border-line bg-white/85 p-5 backdrop-blur md:flex-row md:items-center md:justify-between dark:bg-white/10"
             >
                 <div class="flex min-w-0 items-center gap-4">
-                    <div
-                        class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-background shadow-sm ring-1 ring-line dark:bg-ink-950 dark:text-ink-950"
-                    >
-                        <AppLogoIcon class="h-11 w-11" />
-                    </div>
+                    <BrandMark size="lg" />
                     <div class="min-w-0">
                         <p class="text-sm font-medium text-brand">
                             Cloud Drive share
@@ -122,19 +206,32 @@ function fileDownloadUrl(fileId: string) {
                         </p>
                     </div>
                 </div>
-                <a
+                <div
                     v-if="
                         available &&
                         resourceType === 'file' &&
                         file &&
                         downloadUrl
                     "
-                    :href="downloadUrl"
-                    class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                    class="flex flex-wrap gap-2"
                 >
-                    <Download class="h-4 w-4" />
-                    Download
-                </a>
+                    <button
+                        v-if="isVideo(file)"
+                        type="button"
+                        class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                        @click="openVideoPreview(file)"
+                    >
+                        <Play class="h-4 w-4" />
+                        Preview
+                    </button>
+                    <a
+                        :href="downloadUrl"
+                        class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                    >
+                        <Download class="h-4 w-4" />
+                        Download
+                    </a>
+                </div>
                 <a
                     v-else-if="
                         available &&
@@ -292,13 +389,26 @@ function fileDownloadUrl(fileId: string) {
                         <span class="text-sm text-ink-600 dark:text-ink-300">
                             {{ formatBytes(sharedFile.size_bytes) }}
                         </span>
-                        <a
-                            class="rounded-full p-2 text-brand hover:bg-ink-950/5 md:justify-self-end dark:hover:bg-white/10"
-                            title="Download"
-                            :href="fileDownloadUrl(sharedFile.id)"
+                        <div
+                            class="flex items-center gap-1 md:justify-self-end"
                         >
-                            <Download class="h-4 w-4" />
-                        </a>
+                            <button
+                                v-if="isVideo(sharedFile)"
+                                type="button"
+                                class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                                title="Preview video"
+                                @click="openVideoPreview(sharedFile)"
+                            >
+                                <Play class="h-4 w-4" />
+                            </button>
+                            <a
+                                class="rounded-full p-2 text-brand hover:bg-ink-950/5 dark:hover:bg-white/10"
+                                title="Download"
+                                :href="fileDownloadUrl(sharedFile.id)"
+                            >
+                                <Download class="h-4 w-4" />
+                            </a>
+                        </div>
                     </div>
 
                     <p
@@ -321,6 +431,75 @@ function fileDownloadUrl(fileId: string) {
                     {{ unavailableMessage }}
                 </p>
             </section>
+
+            <Dialog
+                :open="previewTarget !== null"
+                @update:open="($event) => !$event && closeVideoPreview()"
+            >
+                <DialogContent class="overflow-hidden p-0 sm:max-w-4xl">
+                    <DialogHeader class="px-6 pt-6 pr-14">
+                        <DialogTitle>Video preview</DialogTitle>
+                        <DialogDescription class="truncate">
+                            {{ previewTarget?.display_name }}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div
+                        class="mx-4 mb-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black sm:mx-6"
+                    >
+                        <div
+                            v-if="previewLoading"
+                            class="flex flex-col items-center gap-3 text-sm text-white/75"
+                        >
+                            <LoaderCircle class="h-6 w-6 animate-spin" />
+                            Preparing secure preview
+                        </div>
+                        <div
+                            v-else-if="previewError"
+                            role="alert"
+                            class="max-w-md px-6 text-center text-sm text-white/80"
+                        >
+                            <AlertCircle
+                                class="mx-auto mb-3 h-7 w-7 text-amber-300"
+                            />
+                            {{ previewError }}
+                        </div>
+                        <video
+                            v-else-if="previewUrl"
+                            ref="previewVideo"
+                            :key="previewUrl"
+                            :src="previewUrl"
+                            class="h-full w-full bg-black object-contain"
+                            controls
+                            playsinline
+                            preload="metadata"
+                            @error="markPreviewPlaybackError"
+                        >
+                            This browser cannot play the selected video.
+                        </video>
+                    </div>
+                    <DialogFooter class="gap-2 px-6 pb-6 sm:gap-2">
+                        <button
+                            type="button"
+                            class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                            @click="closeVideoPreview"
+                        >
+                            Close
+                        </button>
+                        <a
+                            v-if="previewTarget"
+                            class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                            :href="
+                                resourceType === 'file' && downloadUrl
+                                    ? downloadUrl
+                                    : fileDownloadUrl(previewTarget.id)
+                            "
+                        >
+                            <Download class="h-4 w-4" />
+                            Download
+                        </a>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </section>
         <BrandFooter class="mt-8" />
     </main>
