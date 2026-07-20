@@ -52,9 +52,11 @@ class FolderController extends Controller
             'visibility' => ['sometimes', 'required', 'in:private,workspace'],
             'parent_folder_id' => ['sometimes', 'nullable', 'string', 'exists:folders,id'],
         ]);
+        $previousParentId = $folder->parent_folder_id;
+        $previousName = $folder->name;
 
         if (array_key_exists('parent_folder_id', $data) && $data['parent_folder_id']) {
-            $targetParent = Folder::query()->findOrFail($data['parent_folder_id']);
+            $targetParent = Folder::query()->where('is_deleted', false)->findOrFail($data['parent_folder_id']);
             abort_unless($permissions->canManage($request->user(), $targetParent), 403);
             abort_if(in_array($data['parent_folder_id'], $drive->descendantFolderIds($folder->id), true), 422);
         }
@@ -65,9 +67,20 @@ class FolderController extends Controller
         }
 
         $folder->update($data);
-        $audit->log('folder.updated', 'folder', $folder->id, $data, $request);
+        $moved = array_key_exists('parent_folder_id', $data) && $previousParentId !== $folder->parent_folder_id;
+        $audit->log($moved ? 'folder.moved' : 'folder.updated', 'folder', $folder->id, $moved ? [
+            'fromFolderId' => $previousParentId,
+            'toFolderId' => $folder->parent_folder_id,
+            'name' => $folder->name,
+        ] : $data, $request);
 
-        return back()->with('success', 'Folder updated.');
+        $renamedForConflict = $moved && $previousName !== $folder->name;
+
+        return back()->with('success', match (true) {
+            $renamedForConflict => "Folder moved as \"{$folder->name}\" to avoid a name conflict.",
+            $moved => 'Folder moved.',
+            default => 'Folder updated.',
+        });
     }
 
     public function destroy(Request $request, string $folder, DriveQueryService $drive, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse

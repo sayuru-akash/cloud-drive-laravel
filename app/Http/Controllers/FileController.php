@@ -25,9 +25,11 @@ class FileController extends Controller
             'visibility' => ['sometimes', 'required', 'in:private,workspace'],
             'folder_id' => ['sometimes', 'nullable', 'string', 'exists:folders,id'],
         ]);
+        $previousFolderId = $file->folder_id;
+        $previousName = $file->display_name;
 
         if (array_key_exists('folder_id', $data) && $data['folder_id']) {
-            $targetFolder = Folder::query()->findOrFail($data['folder_id']);
+            $targetFolder = Folder::query()->where('is_deleted', false)->findOrFail($data['folder_id']);
             abort_unless($permissions->canManage($request->user(), $targetFolder), 403);
         }
 
@@ -37,9 +39,20 @@ class FileController extends Controller
         }
 
         $file->update($data);
-        $audit->log('file.updated', 'file', $file->id, $data, $request);
+        $moved = array_key_exists('folder_id', $data) && $previousFolderId !== $file->folder_id;
+        $audit->log($moved ? 'file.moved' : 'file.updated', 'file', $file->id, $moved ? [
+            'fromFolderId' => $previousFolderId,
+            'toFolderId' => $file->folder_id,
+            'name' => $file->display_name,
+        ] : $data, $request);
 
-        return back()->with('success', 'File updated.');
+        $renamedForConflict = $moved && $previousName !== $file->display_name;
+
+        return back()->with('success', match (true) {
+            $renamedForConflict => "File moved as \"{$file->display_name}\" to avoid a name conflict.",
+            $moved => 'File moved.',
+            default => 'File updated.',
+        });
     }
 
     public function destroy(Request $request, string $file, DrivePermissionService $permissions, AuditLogger $audit): RedirectResponse

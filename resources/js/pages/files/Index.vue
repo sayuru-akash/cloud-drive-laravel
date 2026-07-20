@@ -3,13 +3,16 @@ import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
     ChevronDown,
+    ChevronRight,
     Check,
     Copy,
     Download,
     FileUp,
     Folder,
+    FolderInput,
     FolderUp,
     Grid2X2,
+    House,
     List,
     LoaderCircle,
     MoreHorizontal,
@@ -77,6 +80,10 @@ type ShareTarget =
 type AccessTarget =
     | { kind: 'file'; item: FileItem }
     | { kind: 'folder'; item: FolderItem };
+type MoveTarget =
+    | { kind: 'file'; item: FileItem }
+    | { kind: 'folder'; item: FolderItem };
+type MoveFolder = { id: string; name: string };
 type Paginated<T> = {
     data: T[];
     links: Array<{ url: string | null; label: string; active: boolean }>;
@@ -112,6 +119,16 @@ const shareCopyState = ref<'idle' | 'copied' | 'failed'>('idle');
 const createdShareUrl = ref<string | null>(null);
 const renameTarget = ref<RenameTarget | null>(null);
 const renameValue = ref('');
+const moveTarget = ref<MoveTarget | null>(null);
+const moveParentFolderId = ref<string | null>(null);
+const moveBreadcrumbs = ref<MoveFolder[]>([]);
+const moveFolders = ref<MoveFolder[]>([]);
+const moveSearch = ref('');
+const movePage = ref(1);
+const moveHasMore = ref(false);
+const moveLoading = ref(false);
+const moveProcessing = ref(false);
+const moveError = ref<string | null>(null);
 const trashTarget = ref<TrashTarget | null>(null);
 const shareTarget = ref<ShareTarget | null>(null);
 const accessTarget = ref<AccessTarget | null>(null);
@@ -134,6 +151,8 @@ const driveRefreshProps = [
 let revalidateTimer: number | null = null;
 let filterTimer: number | null = null;
 let uploadRefreshTimer: number | null = null;
+let moveSearchTimer: number | null = null;
+let moveRequestVersion = 0;
 let lastRevalidatedAt = 0;
 const filterValues = ref({
     q: props.filters.q ?? '',
@@ -169,6 +188,21 @@ const folderItems = computed(() => props.folders.data);
 const fileItems = computed(() => props.files.data);
 const renameTitle = computed(
     () => `Rename ${renameTarget.value?.kind === 'folder' ? 'folder' : 'file'}`,
+);
+const moveResourceName = computed(() => {
+    if (!moveTarget.value) {
+        return '';
+    }
+
+    return moveTarget.value.kind === 'file'
+        ? moveTarget.value.item.display_name
+        : moveTarget.value.item.name;
+});
+const moveDestinationName = computed(
+    () => moveBreadcrumbs.value.at(-1)?.name ?? 'Home',
+);
+const moveIsCurrentLocation = computed(
+    () => moveParentFolderId.value === props.folderId,
 );
 const trashDescription = computed(() => {
     if (!trashTarget.value) {
@@ -363,6 +397,173 @@ function submitRename() {
     }
 
     closeRenameDialog();
+}
+
+function openMoveDialog(target: MoveTarget) {
+    moveTarget.value = target;
+    moveParentFolderId.value = props.folderId;
+    moveBreadcrumbs.value = [];
+    moveFolders.value = [];
+    moveSearch.value = '';
+    moveError.value = null;
+    void loadMoveDestinations(props.folderId);
+}
+
+function closeMoveDialog(force = false) {
+    if (moveProcessing.value && !force) {
+        return;
+    }
+
+    moveRequestVersion += 1;
+
+    if (moveSearchTimer !== null) {
+        window.clearTimeout(moveSearchTimer);
+        moveSearchTimer = null;
+    }
+
+    moveTarget.value = null;
+    moveParentFolderId.value = null;
+    moveBreadcrumbs.value = [];
+    moveFolders.value = [];
+    moveSearch.value = '';
+    moveError.value = null;
+}
+
+async function loadMoveDestinations(
+    parentFolderId: string | null,
+    page = 1,
+    append = false,
+) {
+    const target = moveTarget.value;
+
+    if (!target) {
+        return;
+    }
+
+    const requestVersion = ++moveRequestVersion;
+    moveLoading.value = true;
+    moveError.value = null;
+
+    try {
+        const params = new URLSearchParams({
+            target_kind: target.kind,
+            target_id: target.item.id,
+            page: String(page),
+        });
+
+        if (parentFolderId) {
+            params.set('parent_folder_id', parentFolderId);
+        }
+
+        if (moveSearch.value.trim()) {
+            params.set('q', moveSearch.value.trim());
+        }
+
+        const response = await fetch(
+            `/api/folders/move-destinations?${params.toString()}`,
+            { headers: { Accept: 'application/json' } },
+        );
+        const body = (await response.json().catch(() => null)) as {
+            parentFolderId?: string | null;
+            breadcrumbs?: MoveFolder[];
+            folders?: MoveFolder[];
+            page?: number;
+            hasMore?: boolean;
+            message?: string;
+        } | null;
+
+        if (!response.ok || !body?.folders || !body.breadcrumbs) {
+            throw new Error(
+                body?.message ?? 'Move destinations could not be loaded.',
+            );
+        }
+
+        if (requestVersion !== moveRequestVersion || !moveTarget.value) {
+            return;
+        }
+
+        moveParentFolderId.value = body.parentFolderId ?? null;
+        moveBreadcrumbs.value = body.breadcrumbs;
+        moveFolders.value = append
+            ? [...moveFolders.value, ...body.folders]
+            : body.folders;
+        movePage.value = body.page ?? page;
+        moveHasMore.value = body.hasMore ?? false;
+    } catch (error) {
+        if (requestVersion === moveRequestVersion) {
+            moveError.value =
+                error instanceof Error
+                    ? error.message
+                    : 'Move destinations could not be loaded.';
+        }
+    } finally {
+        if (requestVersion === moveRequestVersion) {
+            moveLoading.value = false;
+        }
+    }
+}
+
+function browseMoveFolder(folderId: string | null) {
+    moveSearch.value = '';
+    moveFolders.value = [];
+    void loadMoveDestinations(folderId);
+}
+
+function queueMoveSearch() {
+    if (moveSearchTimer !== null) {
+        window.clearTimeout(moveSearchTimer);
+    }
+
+    moveSearchTimer = window.setTimeout(() => {
+        moveFolders.value = [];
+        void loadMoveDestinations(moveParentFolderId.value);
+    }, 250);
+}
+
+function loadMoreMoveFolders() {
+    if (!moveHasMore.value || moveLoading.value) {
+        return;
+    }
+
+    void loadMoveDestinations(
+        moveParentFolderId.value,
+        movePage.value + 1,
+        true,
+    );
+}
+
+function submitMove() {
+    const target = moveTarget.value;
+
+    if (!target || moveIsCurrentLocation.value || moveLoading.value) {
+        return;
+    }
+
+    const url =
+        target.kind === 'file'
+            ? `/files/${target.item.id}`
+            : `/folders/${target.item.id}`;
+    const data =
+        target.kind === 'file'
+            ? { folder_id: moveParentFolderId.value }
+            : { parent_folder_id: moveParentFolderId.value };
+
+    router.patch(url, data, {
+        only: driveRefreshProps,
+        preserveScroll: true,
+        onStart: () => {
+            moveProcessing.value = true;
+            moveError.value = null;
+        },
+        onError: (errors) => {
+            moveError.value =
+                Object.values(errors)[0] ?? 'This item could not be moved.';
+        },
+        onSuccess: () => closeMoveDialog(true),
+        onFinish: () => {
+            moveProcessing.value = false;
+        },
+    });
 }
 
 function trashFile(file: FileItem) {
@@ -713,6 +914,10 @@ function refreshAfterUploadChange() {
         window.clearTimeout(uploadRefreshTimer);
     }
 
+    if (moveSearchTimer !== null) {
+        window.clearTimeout(moveSearchTimer);
+    }
+
     uploadRefreshTimer = window.setTimeout(() => revalidateDrive(true), 600);
 }
 
@@ -1019,6 +1224,17 @@ watch(
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         @select="
+                                            openMoveDialog({
+                                                kind: 'folder',
+                                                item: folder,
+                                            })
+                                        "
+                                    >
+                                        <FolderInput class="h-4 w-4" />
+                                        Move
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        @select="
                                             manageAccess({
                                                 kind: 'folder',
                                                 item: folder,
@@ -1110,6 +1326,17 @@ watch(
                                     >
                                         <Pencil class="h-4 w-4" />
                                         Rename
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        @select="
+                                            openMoveDialog({
+                                                kind: 'file',
+                                                item: file,
+                                            })
+                                        "
+                                    >
+                                        <FolderInput class="h-4 w-4" />
+                                        Move
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         @select="
@@ -1213,6 +1440,17 @@ watch(
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 @select="
+                                    openMoveDialog({
+                                        kind: 'folder',
+                                        item: folder,
+                                    })
+                                "
+                            >
+                                <FolderInput class="h-4 w-4" />
+                                Move
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                @select="
                                     manageAccess({
                                         kind: 'folder',
                                         item: folder,
@@ -1305,6 +1543,17 @@ watch(
                                 <DropdownMenuItem @select="renameFile(file)">
                                     <Pencil class="h-4 w-4" />
                                     Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    @select="
+                                        openMoveDialog({
+                                            kind: 'file',
+                                            item: file,
+                                        })
+                                    "
+                                >
+                                    <FolderInput class="h-4 w-4" />
+                                    Move
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                     @select="
@@ -1488,6 +1737,189 @@ watch(
                             :disabled="renameValue.trim().length === 0"
                         >
                             Save
+                        </button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog
+            :open="moveTarget !== null"
+            @update:open="($event) => !$event && closeMoveDialog()"
+        >
+            <DialogContent class="sm:max-w-lg">
+                <form class="space-y-5" @submit.prevent="submitMove">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Move
+                            {{
+                                moveTarget?.kind === 'folder'
+                                    ? 'folder'
+                                    : 'file'
+                            }}
+                        </DialogTitle>
+                        <DialogDescription class="truncate">
+                            {{ moveResourceName }}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div class="space-y-3">
+                        <div class="flex min-w-0 items-center gap-1 text-sm">
+                            <button
+                                type="button"
+                                class="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-medium text-brand hover:bg-brand/10"
+                                title="Home"
+                                @click="browseMoveFolder(null)"
+                            >
+                                <House class="h-4 w-4" />
+                                Home
+                            </button>
+                            <template
+                                v-for="breadcrumb in moveBreadcrumbs"
+                                :key="breadcrumb.id"
+                            >
+                                <ChevronRight
+                                    class="text-ink-400 h-4 w-4 shrink-0"
+                                />
+                                <button
+                                    type="button"
+                                    class="min-w-0 truncate rounded-lg px-2 py-1 font-medium text-brand hover:bg-brand/10"
+                                    :title="breadcrumb.name"
+                                    @click="browseMoveFolder(breadcrumb.id)"
+                                >
+                                    {{ breadcrumb.name }}
+                                </button>
+                            </template>
+                        </div>
+
+                        <div
+                            class="flex items-center gap-3 border-y border-line py-3"
+                        >
+                            <span
+                                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
+                            >
+                                <Folder class="h-5 w-5" />
+                            </span>
+                            <span class="min-w-0">
+                                <span
+                                    class="dark:text-ink-400 block text-xs text-ink-500"
+                                    >Move to</span
+                                >
+                                <span class="block truncate font-semibold">
+                                    {{ moveDestinationName }}
+                                </span>
+                            </span>
+                            <span
+                                v-if="moveIsCurrentLocation"
+                                class="dark:text-ink-400 ml-auto shrink-0 text-xs font-medium text-ink-500"
+                            >
+                                Current location
+                            </span>
+                        </div>
+
+                        <label
+                            class="flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 dark:bg-white/10"
+                        >
+                            <Search class="h-4 w-4 shrink-0 text-brand" />
+                            <input
+                                v-model="moveSearch"
+                                class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                                placeholder="Search this folder"
+                                autocomplete="off"
+                                @input="queueMoveSearch"
+                            />
+                        </label>
+
+                        <div
+                            class="max-h-64 min-h-36 overflow-y-auto rounded-xl border border-line"
+                        >
+                            <div
+                                v-if="moveLoading && moveFolders.length === 0"
+                                class="dark:text-ink-400 flex min-h-36 items-center justify-center gap-2 text-sm text-ink-500"
+                            >
+                                <LoaderCircle class="h-5 w-5 animate-spin" />
+                                Loading folders
+                            </div>
+                            <div
+                                v-else-if="moveError"
+                                role="alert"
+                                class="flex min-h-36 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-red-600 dark:text-red-300"
+                            >
+                                <AlertCircle class="h-5 w-5" />
+                                {{ moveError }}
+                            </div>
+                            <div
+                                v-else-if="moveFolders.length === 0"
+                                class="dark:text-ink-400 flex min-h-36 items-center justify-center px-6 text-center text-sm text-ink-500"
+                            >
+                                {{
+                                    moveSearch.trim()
+                                        ? 'No matching folders here.'
+                                        : 'No folders inside this location.'
+                                }}
+                            </div>
+                            <template v-else>
+                                <button
+                                    v-for="folder in moveFolders"
+                                    :key="folder.id"
+                                    type="button"
+                                    class="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left transition last:border-b-0 hover:bg-brand/5"
+                                    @click="browseMoveFolder(folder.id)"
+                                >
+                                    <Folder
+                                        class="h-5 w-5 shrink-0 text-brand"
+                                    />
+                                    <span
+                                        class="min-w-0 flex-1 truncate text-sm font-medium"
+                                    >
+                                        {{ folder.name }}
+                                    </span>
+                                    <ChevronRight
+                                        class="text-ink-400 h-4 w-4 shrink-0"
+                                    />
+                                </button>
+                                <button
+                                    v-if="moveHasMore"
+                                    type="button"
+                                    class="flex w-full items-center justify-center gap-2 border-t border-line px-4 py-3 text-sm font-medium text-brand hover:bg-brand/5"
+                                    :disabled="moveLoading"
+                                    @click="loadMoreMoveFolders"
+                                >
+                                    <LoaderCircle
+                                        v-if="moveLoading"
+                                        class="h-4 w-4 animate-spin"
+                                    />
+                                    {{ moveLoading ? 'Loading' : 'Load more' }}
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <DialogFooter class="gap-2 sm:gap-2">
+                        <button
+                            type="button"
+                            class="cloud-button border border-line bg-white text-ink-700 dark:bg-white/10 dark:text-white"
+                            :disabled="moveProcessing"
+                            @click="closeMoveDialog()"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            class="cloud-button bg-ink-950 text-white dark:bg-white dark:text-ink-950"
+                            :disabled="
+                                moveProcessing ||
+                                moveLoading ||
+                                moveIsCurrentLocation ||
+                                moveError !== null
+                            "
+                        >
+                            <LoaderCircle
+                                v-if="moveProcessing"
+                                class="h-4 w-4 animate-spin"
+                            />
+                            <FolderInput v-else class="h-4 w-4" />
+                            {{ moveProcessing ? 'Moving' : 'Move here' }}
                         </button>
                     </DialogFooter>
                 </form>

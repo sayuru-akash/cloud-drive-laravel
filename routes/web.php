@@ -12,6 +12,7 @@ use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FolderController;
 use App\Http\Controllers\FolderUploadController;
 use App\Http\Controllers\HealthController;
+use App\Http\Controllers\MoveDestinationController;
 use App\Http\Controllers\PublicShareController;
 use App\Http\Controllers\ShareLinkController;
 use Illuminate\Support\Facades\Route;
@@ -49,6 +50,7 @@ Route::get('/api/public-share/{token}/files/{file}/preview', [PublicShareControl
 Route::middleware(['auth', 'verified', 'active'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
     Route::get('files', [FilesController::class, 'index'])->name('files.index');
+    Route::get('/api/folders/move-destinations', MoveDestinationController::class)->name('api.folders.move-destinations');
     Route::post('folders', [FolderController::class, 'store'])->name('folders.store');
     Route::post('/api/folders/upload-tree', FolderUploadController::class)->name('api.folders.upload-tree');
     Route::patch('folders/{folder}', [FolderController::class, 'update'])->name('folders.update');

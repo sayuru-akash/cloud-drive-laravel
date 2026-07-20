@@ -43,6 +43,194 @@ it('blocks moving a file into a folder the user cannot manage', function (): voi
     expect($file->fresh()->folder_id)->toBeNull();
 });
 
+it('lists only valid manageable move destinations', function (): void {
+    $owner = User::factory()->create();
+    $other = User::factory()->create();
+    $movingFolder = Folder::query()->create([
+        'name' => 'Moving folder',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $movingChild = Folder::query()->create([
+        'parent_folder_id' => $movingFolder->id,
+        'name' => 'Moving child',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $destination = Folder::query()->create([
+        'name' => 'Destination',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $nestedDestination = Folder::query()->create([
+        'parent_folder_id' => $destination->id,
+        'name' => 'Nested destination',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $otherWorkspaceFolder = Folder::query()->create([
+        'name' => 'Other workspace folder',
+        'owner_user_id' => $other->id,
+        'created_by_user_id' => $other->id,
+        'visibility' => ResourceVisibility::Workspace,
+    ]);
+
+    $this->actingAs($owner)
+        ->getJson('/api/folders/move-destinations?'.http_build_query([
+            'target_kind' => 'folder',
+            'target_id' => $movingFolder->id,
+        ]))
+        ->assertSuccessful()
+        ->assertJsonPath('folders.0.id', $destination->id)
+        ->assertJsonCount(1, 'folders');
+
+    $this->actingAs($owner)
+        ->getJson('/api/folders/move-destinations?'.http_build_query([
+            'target_kind' => 'folder',
+            'target_id' => $movingFolder->id,
+            'parent_folder_id' => $destination->id,
+        ]))
+        ->assertSuccessful()
+        ->assertJsonPath('breadcrumbs.0.id', $destination->id)
+        ->assertJsonPath('folders.0.id', $nestedDestination->id);
+
+    $this->actingAs($owner)
+        ->getJson('/api/folders/move-destinations?'.http_build_query([
+            'target_kind' => 'folder',
+            'target_id' => $movingFolder->id,
+            'parent_folder_id' => $movingChild->id,
+        ]))
+        ->assertUnprocessable();
+
+    expect($otherWorkspaceFolder->owner_user_id)->toBe($other->id);
+});
+
+it('moves a file with collision-safe naming and a dedicated audit event', function (): void {
+    $owner = User::factory()->create();
+    $destination = Folder::query()->create([
+        'name' => 'Destination',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    DriveFile::query()->create([
+        'folder_id' => $destination->id,
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'brief.pdf',
+        'display_name' => 'brief.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 256,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'brief.pdf',
+        'display_name' => 'brief.pdf',
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 512,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($owner)
+        ->patch("/files/{$file->id}", ['folder_id' => $destination->id])
+        ->assertRedirect()
+        ->assertSessionHas('success', 'File moved as "brief (1).pdf" to avoid a name conflict.');
+
+    expect($file->fresh()->folder_id)->toBe($destination->id)
+        ->and($file->fresh()->display_name)->toBe('brief (1).pdf')
+        ->and(AuditLog::query()->where('action_type', 'file.moved')->where('resource_id', $file->id)->exists())->toBeTrue();
+});
+
+it('moves a folder and records its original and destination parents', function (): void {
+    $owner = User::factory()->create();
+    $sourceParent = Folder::query()->create([
+        'name' => 'Source',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $destination = Folder::query()->create([
+        'name' => 'Destination',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $folder = Folder::query()->create([
+        'parent_folder_id' => $sourceParent->id,
+        'name' => 'Project',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($owner)
+        ->patch("/folders/{$folder->id}", ['parent_folder_id' => $destination->id])
+        ->assertRedirect()
+        ->assertSessionHas('success', 'Folder moved.');
+
+    $audit = AuditLog::query()
+        ->where('action_type', 'folder.moved')
+        ->where('resource_id', $folder->id)
+        ->firstOrFail();
+
+    expect($folder->fresh()->parent_folder_id)->toBe($destination->id)
+        ->and($audit->metadata_json['fromFolderId'])->toBe($sourceParent->id)
+        ->and($audit->metadata_json['toFolderId'])->toBe($destination->id);
+});
+
+it('rejects deleted destinations and folder descendant cycles', function (): void {
+    $owner = User::factory()->create();
+    $folder = Folder::query()->create([
+        'name' => 'Parent',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $child = Folder::query()->create([
+        'parent_folder_id' => $folder->id,
+        'name' => 'Child',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+    $deleted = Folder::query()->create([
+        'name' => 'Deleted',
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'visibility' => ResourceVisibility::Private,
+        'is_deleted' => true,
+        'deleted_at' => now(),
+    ]);
+    $file = DriveFile::query()->create([
+        'owner_user_id' => $owner->id,
+        'created_by_user_id' => $owner->id,
+        'original_name' => 'notes.txt',
+        'display_name' => 'notes.txt',
+        'mime_type' => 'text/plain',
+        'size_bytes' => 12,
+        'status' => FileStatus::Ready,
+        'visibility' => ResourceVisibility::Private,
+    ]);
+
+    $this->actingAs($owner)
+        ->patch("/folders/{$folder->id}", ['parent_folder_id' => $child->id])
+        ->assertUnprocessable();
+    $this->actingAs($owner)
+        ->patch("/files/{$file->id}", ['folder_id' => $deleted->id])
+        ->assertNotFound();
+
+    expect($folder->fresh()->parent_folder_id)->toBeNull()
+        ->and($file->fresh()->folder_id)->toBeNull();
+});
+
 it('prepares a collision-safe nested folder tree for direct browser uploads', function (): void {
     $owner = User::factory()->create();
     Folder::query()->create([

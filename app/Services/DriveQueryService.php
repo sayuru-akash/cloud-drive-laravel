@@ -106,14 +106,14 @@ class DriveQueryService
     public function descendantFolderIds(string $folderId): array
     {
         $ids = [$folderId];
-        $queue = [$folderId];
+        $level = [$folderId];
 
-        while ($current = array_shift($queue)) {
-            $children = Folder::query()->where('parent_folder_id', $current)->pluck('id')->all();
-            foreach ($children as $child) {
-                $ids[] = $child;
-                $queue[] = $child;
-            }
+        while ($level !== []) {
+            $level = Folder::query()
+                ->whereIn('parent_folder_id', $level)
+                ->pluck('id')
+                ->all();
+            $ids = [...$ids, ...$level];
         }
 
         return $ids;
