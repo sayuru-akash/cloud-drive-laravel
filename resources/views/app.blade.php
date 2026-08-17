@@ -6,27 +6,36 @@
             $requestPath = request()->path() === '/' ? '/' : '/'.trim(request()->path(), '/');
             $isShare = str_starts_with($requestPath, '/s/');
             $isPrivacy = $requestPath === '/privacy';
+            $isTerms = $requestPath === '/terms';
+            $isIndexable = in_array($requestPath, ['/', '/privacy', '/terms'], true);
             $pageTitle = match (true) {
                 $isShare => 'Secure file share | '.$appName,
-                $isPrivacy => 'Privacy | '.$appName,
+                $isPrivacy => 'Privacy Policy | '.$appName,
+                $isTerms => 'Terms of Use | '.$appName,
+                $requestPath === '/' => 'Private Team File Workspace | '.$appName,
                 default => $appName,
             };
             $pageDescription = match (true) {
                 $isShare => 'Secure download-only file sharing for authorized Cloud Drive recipients.',
-                $isPrivacy => 'How Cloud Drive handles metadata, direct Backblaze B2 file transfers, signed download links, and audit logs.',
-                default => 'Private team file management with direct Backblaze B2 uploads, download-only share links, retention, audit logs, and admin controls.',
+                $isPrivacy => 'How Cloud Drive handles account data, file metadata, private object storage, signed links, sharing, retention, and audit records.',
+                $isTerms => 'Terms governing authorized access, file uploads, sharing, retention, security, and administration in Cloud Drive.',
+                default => 'Cloud Drive is a private team file workspace for direct uploads, nested folders, controlled sharing, previews, retention, audit logs, and admin access.',
             };
             $previewUrl = $isShare ? url('/') : url($requestPath);
             $previewImage = url('/og-image.png');
-            $robots = 'noindex,nofollow,noarchive';
+            $robots = $isIndexable
+                ? 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'
+                : 'noindex,nofollow,noarchive';
         @endphp
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="application-name" content="{{ $appName }}">
+        <meta name="apple-mobile-web-app-title" content="{{ $appName }}">
         <meta name="description" content="{{ $pageDescription }}">
         <meta name="robots" content="{{ $robots }}">
         <meta name="theme-color" content="#197a68">
         <meta property="og:site_name" content="{{ $appName }}">
+        <meta property="og:locale" content="en_US">
         <meta property="og:title" content="{{ $pageTitle }}">
         <meta property="og:description" content="{{ $pageDescription }}">
         <meta property="og:type" content="website">
@@ -41,6 +50,21 @@
         <meta name="twitter:description" content="{{ $pageDescription }}">
         <meta name="twitter:image" content="{{ $previewImage }}">
         <meta name="twitter:image:alt" content="{{ $appName }} secure file workspace">
+        @if ($isIndexable)
+            <link rel="canonical" href="{{ $previewUrl }}">
+            <script type="application/ld+json">{!! json_encode([
+                '@context' => 'https://schema.org',
+                '@type' => $requestPath === '/' ? 'WebApplication' : 'WebPage',
+                'name' => $pageTitle,
+                'description' => $pageDescription,
+                'url' => $previewUrl,
+                'provider' => [
+                    '@type' => 'Organization',
+                    'name' => 'Codezela Technologies',
+                    'url' => 'https://codezela.com',
+                ],
+            ], JSON_UNESCAPED_SLASHES) !!}</script>
+        @endif
 
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>
@@ -68,8 +92,10 @@
             }
         </style>
 
+        <link rel="icon" href="/favicon.ico" sizes="32x32">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="manifest" href="/site.webmanifest">
 
         @fonts
 

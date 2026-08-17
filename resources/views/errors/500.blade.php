@@ -1,0 +1,1 @@
+@include('errors.layout', ['status' => '500', 'title' => 'Server error', 'heading' => 'The request could not be completed.', 'message' => 'An unexpected problem occurred. The issue has been recorded. Return to the workspace and retry when ready.'])

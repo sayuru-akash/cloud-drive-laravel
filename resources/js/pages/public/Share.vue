@@ -181,6 +181,7 @@ function markPreviewPlaybackError() {
         :title="resourceType === 'folder' ? 'Shared folder' : 'Shared file'"
         description="Secure Cloud Drive share link."
         path="/"
+        :indexable="false"
     />
     <main class="flex min-h-screen flex-col bg-background px-4 py-8">
         <section class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6">

@@ -11,7 +11,9 @@ class PreventSearchIndexing
     public function handle(Request $request, Closure $next): Response
     {
         $response = $next($request);
-        $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+        if (! $request->routeIs('home', 'privacy', 'terms')) {
+            $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+        }
 
         return $response;
     }

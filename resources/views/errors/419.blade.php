@@ -1,0 +1,1 @@
+@include('errors.layout', ['status' => '419', 'title' => 'Session expired', 'heading' => 'Your session has expired.', 'message' => 'For security, the previous request can no longer be completed. Log in again and retry the action.'])

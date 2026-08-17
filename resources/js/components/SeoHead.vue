@@ -9,12 +9,14 @@ const props = withDefaults(
         path?: string;
         image?: string;
         type?: 'website' | 'article';
+        indexable?: boolean;
     }>(),
     {
         description:
             'A private workspace file manager with direct Backblaze B2 uploads, download-only sharing, retention, audit logs, and admin controls.',
         image: '/og-image.png',
         type: 'website',
+        indexable: true,
     },
 );
 
@@ -38,7 +40,29 @@ const fullTitle = computed(() =>
         ? props.title
         : `${props.title} | ${appName.value}`,
 );
-const robots = 'noindex,nofollow,noarchive';
+const robots = computed(() =>
+    props.indexable
+        ? 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'
+        : 'noindex,nofollow,noarchive',
+);
+const schema = computed(() => ({
+    '@context': 'https://schema.org',
+    '@type': props.path === '/' ? 'WebApplication' : 'WebPage',
+    name: fullTitle.value,
+    description: props.description,
+    url: canonical.value,
+    ...(props.path === '/'
+        ? {
+              applicationCategory: 'BusinessApplication',
+              operatingSystem: 'Web',
+              provider: {
+                  '@type': 'Organization',
+                  name: 'Codezela Technologies',
+                  url: 'https://codezela.com',
+              },
+          }
+        : {}),
+}));
 </script>
 
 <template>
@@ -49,6 +73,12 @@ const robots = 'noindex,nofollow,noarchive';
             :content="props.description"
         />
         <meta head-key="robots" name="robots" :content="robots" />
+        <link
+            v-if="props.indexable"
+            head-key="canonical"
+            rel="canonical"
+            :href="canonical"
+        />
 
         <meta
             head-key="og:site_name"
@@ -110,5 +140,12 @@ const robots = 'noindex,nofollow,noarchive';
             name="twitter:image:alt"
             :content="`${appName} secure file workspace`"
         />
+        <script
+            v-if="props.indexable"
+            head-key="structured-data"
+            type="application/ld+json"
+        >
+            {{ JSON.stringify(schema) }}
+        </script>
     </Head>
 </template>

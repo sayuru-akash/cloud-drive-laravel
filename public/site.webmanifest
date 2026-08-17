@@ -1,0 +1,16 @@
+{
+    "name": "Cloud Drive",
+    "short_name": "Cloud Drive",
+    "description": "Private team file workspace by Codezela Technologies.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f7f4ee",
+    "theme_color": "#197a68",
+    "icons": [
+        {
+            "src": "/apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        }
+    ]
+}

@@ -1,0 +1,1 @@
+@include('errors.layout', ['status' => '429', 'title' => 'Too many requests', 'heading' => 'Please wait before trying again.', 'message' => 'Too many requests were received in a short period. Nothing has been changed. Wait briefly, then retry.'])

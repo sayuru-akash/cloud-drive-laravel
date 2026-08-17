@@ -1,0 +1,1 @@
+@include('errors.layout', ['status' => '403', 'title' => 'Access denied', 'heading' => 'You do not have access to this page.', 'message' => 'Your account does not have the required permission. Return to the workspace or contact an administrator if access is expected.'])

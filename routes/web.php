@@ -20,8 +20,23 @@ use Illuminate\Support\Facades\Route;
 Route::get('/robots.txt', function () {
     $content = implode("\n", [
         'User-agent: *',
-        'Disallow: /',
+        'Allow: /$',
+        'Allow: /privacy$',
+        'Allow: /terms$',
+        'Disallow: /api/',
+        'Disallow: /admin',
+        'Disallow: /audit',
+        'Disallow: /dashboard',
+        'Disallow: /deleted',
+        'Disallow: /files',
+        'Disallow: /forgot-password',
+        'Disallow: /login',
+        'Disallow: /reset-password',
+        'Disallow: /s/',
+        'Disallow: /settings',
+        'Disallow: /shared',
         '',
+        'Sitemap: '.url('/sitemap.xml'),
     ]);
 
     return response($content, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
@@ -31,6 +46,9 @@ Route::get('/sitemap.xml', function () {
     return response()
         ->view('sitemap', [
             'urls' => [
+                ['loc' => route('home'), 'priority' => '1.0'],
+                ['loc' => route('privacy'), 'priority' => '0.5'],
+                ['loc' => route('terms'), 'priority' => '0.5'],
             ],
         ])
         ->header('Content-Type', 'application/xml; charset=UTF-8');
@@ -41,6 +59,7 @@ Route::get('/api/health', HealthController::class)->name('health');
 Route::inertia('/', 'Welcome')->name('home');
 
 Route::inertia('/privacy', 'public/Privacy')->name('privacy');
+Route::inertia('/terms', 'public/Terms')->name('terms');
 Route::get('/s/{token}', [PublicShareController::class, 'show'])->name('public-share.show');
 Route::get('/api/public-share/{token}/download', [PublicShareController::class, 'download'])->name('public-share.download');
 Route::get('/api/public-share/{token}/preview', [PublicShareController::class, 'preview'])->name('public-share.preview');

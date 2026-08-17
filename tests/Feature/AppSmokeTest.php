@@ -6,6 +6,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 it('renders all public pages without server errors', function (): void {
     $this->get('/')->assertOk()->assertInertia(fn (Assert $page) => $page->component('Welcome'));
     $this->get('/privacy')->assertOk()->assertInertia(fn (Assert $page) => $page->component('public/Privacy'));
+    $this->get('/terms')->assertOk()->assertInertia(fn (Assert $page) => $page->component('public/Terms'));
     $this->get('/s/not-a-real-token')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page

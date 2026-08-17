@@ -10,33 +10,53 @@ use App\Models\ShareLink;
 use App\Models\User;
 use Illuminate\Support\Str;
 
-it('serves robots rules that keep the full app out of search', function (): void {
+it('serves robots rules that expose only public marketing and legal pages', function (): void {
     $this->get('/robots.txt')
         ->assertOk()
         ->assertHeader('Content-Type', 'text/plain; charset=UTF-8')
         ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         ->assertSee('User-agent: *', false)
-        ->assertSee('Disallow: /', false)
-        ->assertDontSee('Allow:', false)
-        ->assertDontSee('Sitemap:', false);
+        ->assertSee('Allow: /$', false)
+        ->assertSee('Allow: /privacy$', false)
+        ->assertSee('Allow: /terms$', false)
+        ->assertSee('Disallow: /dashboard', false)
+        ->assertSee('Disallow: /s/', false)
+        ->assertSee('Sitemap: '.url('/sitemap.xml'), false);
 });
 
-it('serves an empty sitemap because no app page is indexable', function (): void {
+it('serves a sitemap containing only canonical public pages', function (): void {
     $this->get('/sitemap.xml')
         ->assertOk()
         ->assertHeader('Content-Type', 'application/xml; charset=UTF-8')
         ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         ->assertSee('<urlset', false)
-        ->assertDontSee('<loc>', false);
+        ->assertSee('<loc>'.route('home').'</loc>', false)
+        ->assertSee('<loc>'.route('privacy').'</loc>', false)
+        ->assertSee('<loc>'.route('terms').'</loc>', false)
+        ->assertDontSee('/dashboard</loc>', false)
+        ->assertDontSee('/s/</loc>', false);
 });
 
-it('renders noindex meta and safe generic previews for public pages', function (): void {
-    $this->get('/')
+it('renders indexable metadata and canonical URLs on public pages', function (string $path): void {
+    $this->get($path)
+        ->assertOk()
+        ->assertHeaderMissing('X-Robots-Tag')
+        ->assertSee('name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"', false)
+        ->assertSee('property="og:image" content="'.url('/og-image.png').'"', false)
+        ->assertSee('property="og:image:width" content="1200"', false)
+        ->assertSee('rel="canonical" href="'.url($path).'"', false)
+        ->assertSee('type="application/ld+json"', false);
+})->with([
+    'home' => '/',
+    'privacy' => '/privacy',
+    'terms' => '/terms',
+]);
+
+it('keeps authenticated and auth surfaces out of search', function (): void {
+    $this->get('/login')
         ->assertOk()
         ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
         ->assertSee('name="robots" content="noindex,nofollow,noarchive"', false)
-        ->assertSee('property="og:image" content="'.url('/og-image.png').'"', false)
-        ->assertSee('property="og:image:width" content="1200"', false)
         ->assertDontSee('rel="canonical"', false);
 });
 
@@ -88,4 +108,13 @@ it('keeps public share crawler previews useful without exposing file metadata', 
         ->not->toContain('board-private-strategy.pdf')
         ->not->toContain('objects/board-private-strategy.pdf')
         ->not->toContain('share-preview-token');
+});
+
+it('renders a branded noindex page for missing routes', function (): void {
+    $this->get('/not-a-real-cloud-drive-page')
+        ->assertNotFound()
+        ->assertHeader('X-Robots-Tag', 'noindex, nofollow, noarchive')
+        ->assertSee('This page could not be found.', false)
+        ->assertSee('/favicon.svg', false)
+        ->assertSee('name="robots" content="noindex,nofollow,noarchive"', false);
 });

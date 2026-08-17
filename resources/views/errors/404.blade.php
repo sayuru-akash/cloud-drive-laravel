@@ -1,0 +1,1 @@
+@include('errors.layout', ['status' => '404', 'title' => 'Page not found', 'heading' => 'This page could not be found.', 'message' => 'The address may be incorrect, or the page may have moved. Return home or log in to open the workspace.'])
