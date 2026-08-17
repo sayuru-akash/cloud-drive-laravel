@@ -6,8 +6,8 @@
     <meta name="robots" content="noindex,nofollow,noarchive">
     <meta name="theme-color" content="#197a68">
     <title>{{ $title }} | Cloud Drive</title>
-    <link rel="icon" href="/favicon.ico" sizes="32x32">
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico?v=20260817" sizes="32x32">
+    <link rel="icon" href="/favicon.svg?v=20260817" type="image/svg+xml">
     <script>
         (function () {
             var storedTheme = localStorage.getItem('theme');
@@ -44,7 +44,7 @@
     </style>
 </head>
 <body>
-    <header><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt=""><span>Cloud Drive</span></a></div></header>
+    <header><div class="bar"><a class="brand" href="/"><img src="/favicon.svg?v=20260817" alt=""><span>Cloud Drive</span></a></div></header>
     <main>
         <div class="code">{{ $status }}</div>
         <h1>{{ $heading }}</h1>
